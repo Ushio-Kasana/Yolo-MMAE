@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QScrollArea, QWidget,
                              QGridLayout, QLabel, QPushButton, QHBoxLayout,
-                             QComboBox)
+                             QComboBox, QInputDialog)
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtCore import Qt
 import cv2
@@ -65,6 +65,9 @@ class ReviewDialog(QDialog):
         for i, name in sorted(self.project_manager.categories.items()):
             self.combo_category.addItem(name, i)
 
+        self.btn_new_cat = QPushButton("+ New")
+        self.btn_new_cat.clicked.connect(self.add_new_category)
+
         btn_apply = QPushButton("Apply to Selected")
         btn_apply.clicked.connect(self.apply_to_selected)
 
@@ -74,6 +77,7 @@ class ReviewDialog(QDialog):
 
         controls_layout.addWidget(lbl)
         controls_layout.addWidget(self.combo_category)
+        controls_layout.addWidget(self.btn_new_cat)
         controls_layout.addWidget(btn_apply)
         controls_layout.addWidget(btn_delete)
         controls_layout.addStretch()
@@ -112,6 +116,18 @@ class ReviewDialog(QDialog):
             w = CropWidget(item, self)
             self.grid.addWidget(w, row, col)
 
+    def add_new_category(self):
+        name, ok = QInputDialog.getText(self, "New Category", "Category Name:")
+        if ok and name:
+            new_id = self.project_manager.add_category(name)
+            # Add to combobox and select it
+            self.combo_category.addItem(name, new_id)
+            index = self.combo_category.findData(new_id)
+            if index != -1:
+                self.combo_category.setCurrentIndex(index)
+            # Update main window list
+            self.main_window.update_category_list()
+
     def delete_selected(self):
         frames_to_save = set()
         for i in range(self.grid.count()):
@@ -143,6 +159,13 @@ class ReviewDialog(QDialog):
                 self.main_window._save_current_frame_to_dataset()
                 self.main_window.current_frame_idx = orig_idx
                 self.main_window.current_frame_data = self.video_processor.get_frame(orig_idx)
+
+        # Re-index remaining items so ann_idx stays accurate for future apply/delete ops
+        for frame_idx in frames_to_save:
+            frame_items = [item for item in self.items if item['frame_idx'] == frame_idx]
+            # Since self.annotations[frame_idx] was filtered, we just match the new index sequentially
+            for new_idx, item in enumerate(frame_items):
+                item['ann_idx'] = new_idx
 
         self.populate_grid()
 
@@ -181,6 +204,9 @@ class CropWidget(QWidget):
         self.item = item
         self.is_selected = False
 
+        # Required for QWidget subclasses to paint custom CSS backgrounds/borders
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
         self.layout = QVBoxLayout()
         self.setLayout(self.layout)
 
@@ -209,7 +235,7 @@ class CropWidget(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self.is_selected = not self.is_selected
             if self.is_selected:
-                self.setStyleSheet("CropWidget { border: 2px solid blue; background-color: lightblue; }")
+                self.setStyleSheet("CropWidget { border: 3px solid white; background-color: rgba(255, 255, 255, 50); }")
             else:
                 self.setStyleSheet("CropWidget { border: 2px solid transparent; background-color: transparent; }")
         super().mousePressEvent(event)
