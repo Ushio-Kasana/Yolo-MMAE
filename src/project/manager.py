@@ -75,7 +75,7 @@ class ProjectManager:
                 if v == name:
                     return k
 
-        new_id = len(self.categories)
+        new_id = max(self.categories.keys(), default=-1) + 1
         self.categories[new_id] = name
         self._save_yaml()
         return new_id
@@ -107,6 +107,25 @@ class ProjectManager:
         with open(label_file, 'w') as f:
             for ann in annotations:
                 f.write(f"{ann['class_id']} {ann['x_center']} {ann['y_center']} {ann['width']} {ann['height']}\n")
+
+    def delete_exported_data_for_class(self, class_id: int):
+        """Removes all annotations matching class_id from existing .txt files on disk."""
+        if not self.train_labels_path.exists():
+            return
+
+        for label_file in self.train_labels_path.glob("*.txt"):
+            lines = []
+            with open(label_file, 'r') as f:
+                lines = f.readlines()
+
+            new_lines = []
+            for line in lines:
+                parts = line.strip().split()
+                if parts and int(parts[0]) != class_id:
+                    new_lines.append(line)
+
+            with open(label_file, 'w') as f:
+                f.writelines(new_lines)
 
     def get_project_name(self):
         return self.project_path.name

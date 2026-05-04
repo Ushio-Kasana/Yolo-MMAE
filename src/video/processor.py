@@ -14,8 +14,8 @@ class VideoProcessor:
         if self.load_full:
             self._load_all_frames()
 
-        # Background subtractor for motion detection (Option 1)
-        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=50, detectShadows=False)
+        # Background subtractor for motion detection (Option 1) - improved parameters
+        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=1000, varThreshold=100, detectShadows=False)
 
     def _load_all_frames(self):
         while True:
@@ -41,20 +41,27 @@ class VideoProcessor:
 
     def detect_motion(self, frame):
         """Returns bounding boxes of moving objects using background subtraction."""
-        fg_mask = self.bg_subtractor.apply(frame)
+        # Blur frame first to reduce minor noise (leaves, camera grain)
+        blurred = cv2.GaussianBlur(frame, (5, 5), 0)
+        fg_mask = self.bg_subtractor.apply(blurred)
 
-        # Noise removal
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
+        # Robust noise removal and filling gaps
+        kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+
+        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel_open)
+        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel_close)
 
         contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         boxes = []
-        min_area = 500  # Minimum size to be considered an object
+        min_area = 1000  # Increased minimum size to ignore small noise
         for contour in contours:
             if cv2.contourArea(contour) > min_area:
                 x, y, w, h = cv2.boundingRect(contour)
                 boxes.append((x, y, w, h))
+
+        # Optional: merge overlapping boxes here if needed
         return boxes
 
 

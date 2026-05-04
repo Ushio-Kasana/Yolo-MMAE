@@ -3,7 +3,7 @@ import sys
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QToolBar,
                              QDockWidget, QListWidget, QInputDialog, QMessageBox,
-                             QCheckBox, QSlider, QDialog)
+                             QCheckBox, QSlider, QDialog, QButtonGroup, QRadioButton)
 from PyQt6.QtCore import Qt, QTimer
 import cv2
 
@@ -67,6 +67,29 @@ class MainWindow(QMainWindow):
         self.btn_review.clicked.connect(self.open_review_window)
         toolbar.addWidget(self.btn_review)
 
+        # Draw Tools Toolbar
+        draw_toolbar = QToolBar("Drawing Tools")
+        self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, draw_toolbar)
+
+        self.btn_grp = QButtonGroup(self)
+        self.rad_rect = QRadioButton("Rectangle")
+        self.rad_rect.setChecked(True)
+        self.rad_poly = QRadioButton("Polygon")
+        self.rad_auto = QRadioButton("Auto-Scale")
+
+        self.btn_grp.addButton(self.rad_rect)
+        self.btn_grp.addButton(self.rad_poly)
+        self.btn_grp.addButton(self.rad_auto)
+
+        draw_toolbar.addWidget(QLabel("<b>Drawing Tools</b>"))
+        draw_toolbar.addWidget(self.rad_rect)
+        draw_toolbar.addWidget(self.rad_poly)
+        draw_toolbar.addWidget(self.rad_auto)
+
+        self.rad_rect.toggled.connect(lambda: self.canvas.set_mode("rectangle") if self.rad_rect.isChecked() else None)
+        self.rad_poly.toggled.connect(lambda: self.canvas.set_mode("polygon") if self.rad_poly.isChecked() else None)
+        self.rad_auto.toggled.connect(lambda: self.canvas.set_mode("autoscale") if self.rad_auto.isChecked() else None)
+
         # Bottom Frame Controls
         frame_dock = QDockWidget("Frame Controls", self)
         frame_widget = QWidget()
@@ -98,12 +121,22 @@ class MainWindow(QMainWindow):
         self.btn_add_cat = QPushButton("Add Category")
         self.btn_add_cat.clicked.connect(self.add_category)
 
+        self.btn_change_cat = QPushButton("Change Class of Selected")
+        self.btn_change_cat.clicked.connect(self.change_box_category)
+
         self.btn_delete_box = QPushButton("Delete Selected Box")
         self.btn_delete_box.clicked.connect(self.delete_box)
 
+        self.btn_delete_cat = QPushButton("Delete Entire Category")
+        self.btn_delete_cat.setStyleSheet("background-color: darkred; color: white;")
+        self.btn_delete_cat.clicked.connect(self.delete_category)
+
+        cat_layout.addWidget(QLabel("Select to draw or change:"))
         cat_layout.addWidget(self.list_categories)
         cat_layout.addWidget(self.btn_add_cat)
+        cat_layout.addWidget(self.btn_change_cat)
         cat_layout.addWidget(self.btn_delete_box)
+        cat_layout.addWidget(self.btn_delete_cat)
         cat_widget.setLayout(cat_layout)
         cat_dock.setWidget(cat_widget)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, cat_dock)
@@ -146,8 +179,8 @@ class MainWindow(QMainWindow):
             self.canvas.set_image(self.current_frame_data)
 
             # Draw existing annotations for this frame
-            boxes = [ann['box'] for ann in self.annotations.get(self.current_frame_idx, [])]
-            self.canvas.draw_boxes(boxes)
+            frame_anns = self.annotations.get(self.current_frame_idx, [])
+            self.canvas.draw_boxes(frame_anns, self.project_manager.categories)
 
             self.lbl_frame.setText(f"Frame: {self.current_frame_idx} / {self.video_processor.total_frames - 1}")
             self.slider.blockSignals(True)
@@ -180,13 +213,70 @@ class MainWindow(QMainWindow):
         if self.current_frame_idx not in self.annotations:
             self.annotations[self.current_frame_idx] = []
         self.annotations[self.current_frame_idx].append({'box': box, 'class_id': class_id})
+        self.show_frame() # Refresh to show label
+
+    def undo_last_box(self):
+        if self.current_frame_idx in self.annotations and self.annotations[self.current_frame_idx]:
+            self.annotations[self.current_frame_idx].pop()
+            self.show_frame()
+
+    def keyPressEvent(self, event):
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Z:
+            self.undo_last_box()
+        super().keyPressEvent(event)
+
+    def change_box_category(self):
+        if self.current_frame_idx not in self.annotations or not self.annotations[self.current_frame_idx]:
+            return
+
+        selected_idx = self.canvas.get_selected_box_index()
+        if selected_idx is not None and 0 <= selected_idx < len(self.annotations[self.current_frame_idx]):
+            new_class_id = self.get_selected_class_id()
+            self.annotations[self.current_frame_idx][selected_idx]['class_id'] = new_class_id
+            self.show_frame()
+        else:
+            QMessageBox.warning(self, "No Selection", "Please click on a bounding box to select it before changing its class.")
 
     def delete_box(self):
-        # For simplicity, if we had tracking of selected box, we'd remove it.
-        # This basic implementation clears all boxes on current frame
-        if self.current_frame_idx in self.annotations:
-            self.annotations[self.current_frame_idx] = []
-            self.canvas.clear_boxes()
+        if self.current_frame_idx not in self.annotations or not self.annotations[self.current_frame_idx]:
+            return
+
+        selected_idx = self.canvas.get_selected_box_index()
+        if selected_idx is not None and 0 <= selected_idx < len(self.annotations[self.current_frame_idx]):
+            self.annotations[self.current_frame_idx].pop(selected_idx)
+            self.show_frame()
+            self.canvas.clear_selection()
+        else:
+            QMessageBox.warning(self, "No Selection", "Please click on a bounding box to select it before deleting.")
+
+    def delete_category(self):
+        selected_item = self.list_categories.currentItem()
+        if not selected_item:
+            QMessageBox.warning(self, "No Selection", "Please select a category from the list to delete.")
+            return
+
+        class_id = int(selected_item.text().split(":")[0])
+        class_name = self.project_manager.categories.get(class_id, "Unknown")
+
+        reply = QMessageBox.question(self, 'Confirm Deletion',
+                                     f"Are you sure you want to completely delete the category '{class_name}'? "
+                                     f"This will remove ALL bounding boxes across ALL frames for this category.",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Remove from annotations
+            for frame_idx, anns in self.annotations.items():
+                self.annotations[frame_idx] = [a for a in anns if a.get('class_id') != class_id]
+
+            # Remove from project manager and disk
+            if class_id in self.project_manager.categories:
+                del self.project_manager.categories[class_id]
+                self.project_manager._save_yaml()
+                self.project_manager.delete_exported_data_for_class(class_id)
+
+            self.update_category_list()
+            self.show_frame()
+            QMessageBox.information(self, "Deleted", f"Category '{class_name}' completely removed.")
 
     def auto_scan_motion(self):
         if not self.video_processor:

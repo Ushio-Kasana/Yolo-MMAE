@@ -101,7 +101,7 @@ class ReviewDialog(QDialog):
             crop = item['crop']
             h, wid, ch = crop.shape
             bytes_per_line = ch * wid
-            q_img = QImage(crop.data, wid, h, bytes_per_line, QImage.Format.Format_BGR888)
+            q_img = QImage(crop.data.tobytes(), wid, h, bytes_per_line, QImage.Format.Format_BGR888)
             pixmap = QPixmap.fromImage(q_img).scaled(100, 100, Qt.AspectRatioMode.KeepAspectRatio)
 
             img_lbl = QLabel()
