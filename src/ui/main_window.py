@@ -3,9 +3,11 @@ import sys
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QToolBar,
                              QDockWidget, QListWidget, QInputDialog, QMessageBox,
-                             QCheckBox, QSlider, QDialog, QButtonGroup, QRadioButton)
+                             QCheckBox, QSlider, QDialog, QButtonGroup, QRadioButton,
+                             QProgressDialog)
 from PyQt6.QtCore import Qt, QTimer
 import cv2
+from PyQt6.QtWidgets import QApplication
 
 from ui.startup import StartupDialog
 from ui.canvas import VideoCanvas
@@ -37,6 +39,8 @@ class MainWindow(QMainWindow):
         self.canvas.box_drawn.connect(self.on_box_drawn)
         self.canvas.box_resized.connect(self.on_box_resized)
 
+        self.pending_suggestions = [] # List of tuples: {'box': (x,y,w,h), 'class_id': int}
+
         # Top Toolbar
         toolbar = QToolBar("Main Toolbar")
         self.addToolBar(toolbar)
@@ -47,6 +51,10 @@ class MainWindow(QMainWindow):
 
         self.cb_load_full = QCheckBox("Load Full Video")
         toolbar.addWidget(self.cb_load_full)
+
+        self.cb_suggestions = QCheckBox("Show Tracking Suggestions")
+        self.cb_suggestions.setChecked(True)
+        toolbar.addWidget(self.cb_suggestions)
 
         toolbar.addSeparator()
 
@@ -59,10 +67,6 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.btn_auto_track)
 
         toolbar.addSeparator()
-
-        self.btn_train = QPushButton("Train YOLO Model")
-        self.btn_train.clicked.connect(self.train_model)
-        toolbar.addWidget(self.btn_train)
 
         self.btn_review = QPushButton("Review Groups")
         self.btn_review.clicked.connect(self.open_review_window)
@@ -109,6 +113,12 @@ class MainWindow(QMainWindow):
 
         self.btn_prev = QPushButton("<< Prev Frame")
         self.btn_prev.clicked.connect(self.prev_frame)
+
+        self.btn_confirm_sug = QPushButton("Confirm Suggestions (Enter)")
+        self.btn_confirm_sug.setStyleSheet("background-color: darkcyan; color: white;")
+        self.btn_confirm_sug.clicked.connect(self.confirm_suggestions)
+        self.btn_confirm_sug.hide()
+
         self.lbl_frame = QLabel("Frame: 0 / 0")
         self.btn_next = QPushButton("Next Frame >>")
         self.btn_next.clicked.connect(self.next_frame)
@@ -118,6 +128,7 @@ class MainWindow(QMainWindow):
 
         frame_layout.addWidget(self.btn_prev)
         frame_layout.addWidget(self.slider)
+        frame_layout.addWidget(self.btn_confirm_sug)
         frame_layout.addWidget(self.lbl_frame)
         frame_layout.addWidget(self.btn_next)
         frame_widget.setLayout(frame_layout)
@@ -194,14 +205,73 @@ class MainWindow(QMainWindow):
             frame_anns = self.annotations.get(self.current_frame_idx, [])
             self.canvas.draw_boxes(frame_anns, self.project_manager.categories)
 
+            # Draw suggestions if any
+            if self.pending_suggestions:
+                self.canvas.draw_suggestions([s['box'] for s in self.pending_suggestions])
+                self.btn_confirm_sug.show()
+            else:
+                self.btn_confirm_sug.hide()
+
             self.lbl_frame.setText(f"Frame: {self.current_frame_idx} / {self.video_processor.total_frames - 1}")
             self.slider.blockSignals(True)
             self.slider.setValue(self.current_frame_idx)
             self.slider.blockSignals(False)
 
+    def confirm_suggestions(self):
+        if not self.pending_suggestions:
+            return
+
+        if self.current_frame_idx not in self.annotations:
+            self.annotations[self.current_frame_idx] = []
+
+        for sug in self.pending_suggestions:
+            self.annotations[self.current_frame_idx].append({'box': sug['box'], 'class_id': sug['class_id']})
+
+        self.pending_suggestions = []
+        self._save_current_frame_to_dataset()
+        self.show_frame()
+
+    def generate_suggestions(self):
+        if not self.cb_suggestions.isChecked() or not self.video_processor:
+            return
+
+        # Clear old suggestions
+        self.pending_suggestions = []
+
+        # We need the previous frame and its annotations to track forward
+        prev_idx = self.current_frame_idx - 1
+        if prev_idx < 0 or prev_idx not in self.annotations or not self.annotations[prev_idx]:
+            return
+
+        # Also skip generating suggestions if the current frame already has annotations
+        # to avoid double-stacking boxes when reviewing already-completed frames
+        if self.current_frame_idx in self.annotations and self.annotations[self.current_frame_idx]:
+            return
+
+        prev_frame = self.video_processor.get_frame(prev_idx)
+        if prev_frame is None:
+            return
+
+        boxes = [ann['box'] for ann in self.annotations[prev_idx]]
+        class_ids = [ann['class_id'] for ann in self.annotations[prev_idx]]
+
+        self.tracker.init_trackers(prev_frame, boxes)
+
+        current_frame_img = self.video_processor.get_frame(self.current_frame_idx)
+        if current_frame_img is None:
+            return
+
+        new_boxes = self.tracker.update(current_frame_img)
+
+        for idx, box in enumerate(new_boxes):
+            if box is not None:
+                self.pending_suggestions.append({'box': box, 'class_id': class_ids[idx]})
+
     def next_frame(self):
         if self.video_processor and self.current_frame_idx < self.video_processor.total_frames - 1:
             self.current_frame_idx += 1
+            # Before showing, attempt to generate suggestions from the previous frame
+            self.generate_suggestions()
             self.show_frame()
 
     def prev_frame(self):
@@ -220,26 +290,60 @@ class MainWindow(QMainWindow):
             return int(text.split(":")[0])
         return 0 # Default to 0 if none selected
 
+    def _save_current_frame_to_dataset(self):
+        """Immediately exports the current frame's data to the YOLO folder (Auto-Save)."""
+        if not self.video_processor or self.current_frame_data is None:
+            return
+
+        frame_idx = self.current_frame_idx
+        anns = self.annotations.get(frame_idx, [])
+
+        img_h, img_w = self.current_frame_data.shape[:2]
+        yolo_anns = []
+
+        for ann in anns:
+            x, y, w, h = ann['box']
+            x_center = (x + w / 2) / img_w
+            y_center = (y + h / 2) / img_h
+            norm_w = w / img_w
+            norm_h = h / img_h
+
+            yolo_anns.append({
+                'class_id': ann['class_id'],
+                'x_center': x_center,
+                'y_center': y_center,
+                'width': norm_w,
+                'height': norm_h
+            })
+
+        img_name = f"frame_{frame_idx:06d}.jpg"
+        self.project_manager.save_annotation(img_name, self.current_frame_data, yolo_anns)
+
     def on_box_drawn(self, box):
         class_id = self.get_selected_class_id()
         if self.current_frame_idx not in self.annotations:
             self.annotations[self.current_frame_idx] = []
         self.annotations[self.current_frame_idx].append({'box': box, 'class_id': class_id})
+        self._save_current_frame_to_dataset()
         self.show_frame() # Refresh to show label
 
     def on_box_resized(self, index, new_box):
         if self.current_frame_idx in self.annotations and 0 <= index < len(self.annotations[self.current_frame_idx]):
             self.annotations[self.current_frame_idx][index]['box'] = new_box
+            self._save_current_frame_to_dataset()
             self.show_frame()
 
     def undo_last_box(self):
         if self.current_frame_idx in self.annotations and self.annotations[self.current_frame_idx]:
             self.annotations[self.current_frame_idx].pop()
+            self._save_current_frame_to_dataset()
             self.show_frame()
 
     def keyPressEvent(self, event):
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Z:
             self.undo_last_box()
+        elif event.key() == Qt.Key.Key_Enter or event.key() == Qt.Key.Key_Return:
+            self.confirm_suggestions()
         super().keyPressEvent(event)
 
     def change_box_category(self):
@@ -250,6 +354,7 @@ class MainWindow(QMainWindow):
         if selected_idx is not None and 0 <= selected_idx < len(self.annotations[self.current_frame_idx]):
             new_class_id = self.get_selected_class_id()
             self.annotations[self.current_frame_idx][selected_idx]['class_id'] = new_class_id
+            self._save_current_frame_to_dataset()
             self.show_frame()
         else:
             QMessageBox.warning(self, "No Selection", "Please click on a bounding box to select it before changing its class.")
@@ -261,6 +366,7 @@ class MainWindow(QMainWindow):
         selected_idx = self.canvas.get_selected_box_index()
         if selected_idx is not None and 0 <= selected_idx < len(self.annotations[self.current_frame_idx]):
             self.annotations[self.current_frame_idx].pop(selected_idx)
+            self._save_current_frame_to_dataset()
             self.show_frame()
             self.canvas.clear_selection()
         else:
@@ -299,9 +405,16 @@ class MainWindow(QMainWindow):
         if not self.video_processor:
             return
 
-        QMessageBox.information(self, "Auto Scan", "Scanning for motion. This may take a moment.")
+        progress = QProgressDialog("Scanning for motion...", "Cancel", 0, self.video_processor.total_frames, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
 
         for i in range(self.video_processor.total_frames):
+            progress.setValue(i)
+            QApplication.processEvents()
+
+            if progress.wasCanceled():
+                break
+
             frame = self.video_processor.get_frame(i)
             if frame is None:
                 continue
@@ -313,8 +426,8 @@ class MainWindow(QMainWindow):
                 for b in boxes:
                     self.annotations[i].append({'box': b, 'class_id': 0}) # default class
 
+        progress.setValue(self.video_processor.total_frames)
         self.show_frame()
-        QMessageBox.information(self, "Done", "Auto scan complete. Please review and assign categories.")
 
     def auto_track(self):
         if not self.video_processor or self.current_frame_idx not in self.annotations:
@@ -329,9 +442,18 @@ class MainWindow(QMainWindow):
 
         self.tracker.init_trackers(self.current_frame_data, boxes)
 
-        QMessageBox.information(self, "Tracking", "Tracking objects through remaining frames...")
+        total_steps = self.video_processor.total_frames - self.current_frame_idx
+        progress = QProgressDialog("Tracking objects...", "Cancel", 0, total_steps, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
 
+        step = 0
         for i in range(self.current_frame_idx + 1, self.video_processor.total_frames):
+            progress.setValue(step)
+            QApplication.processEvents()
+
+            if progress.wasCanceled():
+                break
+
             frame = self.video_processor.get_frame(i)
             if frame is None:
                 break
@@ -344,9 +466,10 @@ class MainWindow(QMainWindow):
             for idx, box in enumerate(new_boxes):
                 if box is not None:
                     self.annotations[i].append({'box': box, 'class_id': class_ids[idx]})
+            step += 1
 
+        progress.setValue(total_steps)
         self.show_frame()
-        QMessageBox.information(self, "Done", "Tracking complete.")
 
     def open_review_window(self):
         from ui.review import ReviewDialog
@@ -364,14 +487,29 @@ class MainWindow(QMainWindow):
         if not self.video_processor:
             return
 
-        QMessageBox.information(self, "Exporting", "Saving frames and annotations to dataset...")
+        total_items = len(self.annotations.items())
+        if total_items == 0:
+            QMessageBox.information(self, "Nothing to Export", "No annotations found.")
+            return
 
+        progress = QProgressDialog("Saving frames and annotations...", "Cancel", 0, total_items, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+
+        step = 0
         for frame_idx, anns in self.annotations.items():
+            progress.setValue(step)
+            QApplication.processEvents()
+
+            if progress.wasCanceled():
+                break
+
             if not anns:
+                step += 1
                 continue
 
             frame = self.video_processor.get_frame(frame_idx)
             if frame is None:
+                step += 1
                 continue
 
             img_h, img_w = frame.shape[:2]
@@ -395,25 +533,7 @@ class MainWindow(QMainWindow):
 
             img_name = f"frame_{frame_idx:06d}.jpg"
             self.project_manager.save_annotation(img_name, frame, yolo_anns)
+            step += 1
 
-        QMessageBox.information(self, "Done", "Dataset exported successfully.")
-
-    def train_model(self):
-        from training.yolo_trainer import YoloTrainer
-
-        reply = QMessageBox.question(self, 'Export First?',
-                                     'Do you want to export current annotations to the dataset before training?',
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-
-        if reply == QMessageBox.StandardButton.Yes:
-            self.export_dataset()
-
-        trainer = YoloTrainer(self.project_manager.project_path)
-        try:
-            QMessageBox.information(self, "Training", "Training started. Check console for progress.")
-            # Note: Training blocks the UI in this basic implementation.
-            # For a production app, this should run in a QThread.
-            best_model = trainer.train(epochs=5, project_name=self.project_manager.get_project_name())
-            QMessageBox.information(self, "Done", f"Training complete! Model saved to:\n{best_model}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Training failed:\n{str(e)}")
+        progress.setValue(total_items)
+        QMessageBox.information(self, "Done", "Project dataset saved successfully.")

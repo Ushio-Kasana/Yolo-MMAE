@@ -38,6 +38,9 @@ class VideoCanvas(QGraphicsView):
         self.text_items = [] # List of QGraphicsTextItem
         self.selected_index = None
 
+        # Suggestions state
+        self.suggestion_items = []
+
         self.setMouseTracking(True)
 
     def set_mode(self, mode):
@@ -69,10 +72,24 @@ class VideoCanvas(QGraphicsView):
             self.scene.removeItem(item)
         for item in self.text_items:
             self.scene.removeItem(item)
+        for item in self.suggestion_items:
+            self.scene.removeItem(item)
         self.rect_items.clear()
         self.text_items.clear()
+        self.suggestion_items.clear()
         self.boxes.clear()
         self.selected_index = None
+
+    def draw_suggestions(self, suggestions):
+        """Draws suggested tracking boxes (cyan, dashed border)."""
+        for box in suggestions:
+            if box is not None:
+                x, y, w, h = box
+                rect = QGraphicsRectItem(QRectF(x, y, w, h))
+                pen = QPen(QColor("cyan"), 2, Qt.PenStyle.DashLine)
+                rect.setPen(pen)
+                self.scene.addItem(rect)
+                self.suggestion_items.append(rect)
 
     def get_selected_box_index(self):
         return self.selected_index

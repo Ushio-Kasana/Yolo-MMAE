@@ -102,12 +102,25 @@ class ReviewDialog(QDialog):
             return
 
         # Find all selected CropWidgets
+        frames_to_save = set()
         for i in range(self.grid.count()):
             widget = self.grid.itemAt(i).widget()
             if isinstance(widget, CropWidget) and widget.is_selected:
                 item = widget.item
                 item['class_id'] = new_class_id
                 self.main_window.annotations[item['frame_idx']][item['ann_idx']]['class_id'] = new_class_id
+                frames_to_save.add(item['frame_idx'])
+
+        # Trigger autosave for modified frames
+        for frame_idx in frames_to_save:
+            # Temporarily set current frame idx to trick the autosave function
+            orig_idx = self.main_window.current_frame_idx
+            self.main_window.current_frame_idx = frame_idx
+            self.main_window.current_frame_data = self.video_processor.get_frame(frame_idx)
+            self.main_window._save_current_frame_to_dataset()
+            # Restore
+            self.main_window.current_frame_idx = orig_idx
+            self.main_window.current_frame_data = self.video_processor.get_frame(orig_idx)
 
         # Repopulate to reflect changes
         self.populate_grid()

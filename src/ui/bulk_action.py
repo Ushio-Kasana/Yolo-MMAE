@@ -80,9 +80,12 @@ class BulkActionDialog(QDialog):
             return
 
         new_cat = self.combo_move_cat.currentData()
+        frames_to_save = set()
         for frame_idx, box_idx in matches:
             self.main_window.annotations[frame_idx][box_idx]['class_id'] = new_cat
+            frames_to_save.add(frame_idx)
 
+        self._trigger_autosave(frames_to_save)
         QMessageBox.information(self, "Success", f"Moved {len(matches)} boxes to new category.")
         self.accept()
 
@@ -100,15 +103,27 @@ class BulkActionDialog(QDialog):
             # Delete in reverse order to not mess up indices
             # Group by frame first
             frame_deletes = {}
+            frames_to_save = set()
             for f_idx, b_idx in matches:
                 if f_idx not in frame_deletes:
                     frame_deletes[f_idx] = []
                 frame_deletes[f_idx].append(b_idx)
+                frames_to_save.add(f_idx)
 
             for f_idx, b_indices in frame_deletes.items():
                 b_indices.sort(reverse=True)
                 for b_idx in b_indices:
                     self.main_window.annotations[f_idx].pop(b_idx)
 
+            self._trigger_autosave(frames_to_save)
             QMessageBox.information(self, "Deleted", f"Deleted {len(matches)} boxes.")
             self.accept()
+
+    def _trigger_autosave(self, frames):
+        orig_idx = self.main_window.current_frame_idx
+        for f_idx in frames:
+            self.main_window.current_frame_idx = f_idx
+            self.main_window.current_frame_data = self.main_window.video_processor.get_frame(f_idx)
+            self.main_window._save_current_frame_to_dataset()
+        self.main_window.current_frame_idx = orig_idx
+        self.main_window.current_frame_data = self.main_window.video_processor.get_frame(orig_idx)
