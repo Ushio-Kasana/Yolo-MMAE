@@ -80,16 +80,39 @@ class VideoCanvas(QGraphicsView):
         self.boxes.clear()
         self.selected_index = None
 
-    def draw_suggestions(self, suggestions):
+    def draw_suggestions(self, suggestions, categories_map=None):
         """Draws suggested tracking boxes (cyan, dashed border)."""
-        for box in suggestions:
-            if box is not None:
-                x, y, w, h = box
+        for s in suggestions:
+            if s and s.get('box'):
+                x, y, w, h = s['box']
                 rect = QGraphicsRectItem(QRectF(x, y, w, h))
                 pen = QPen(QColor("cyan"), 2, Qt.PenStyle.DashLine)
                 rect.setPen(pen)
                 self.scene.addItem(rect)
                 self.suggestion_items.append(rect)
+
+                # Draw text label if provided
+                if categories_map is not None:
+                    class_name = categories_map.get(s.get('class_id', 0), "Unknown")
+                    text = QGraphicsTextItem(class_name)
+                    text.setDefaultTextColor(QColor("cyan"))
+                    text.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+
+                    text_bg = QGraphicsRectItem()
+                    text_bg.setBrush(QColor(0, 0, 0, 150))
+                    text_bg.setPen(QPen(Qt.PenStyle.NoPen))
+
+                    text.setPos(x, y - 20 if y >= 20 else 0)
+                    text_rect = text.boundingRect()
+                    text_bg.setRect(text.x(), text.y(), text_rect.width(), text_rect.height())
+
+                    text_bg.setZValue(1)
+                    text.setZValue(2)
+
+                    self.scene.addItem(text_bg)
+                    self.scene.addItem(text)
+                    self.suggestion_items.append(text_bg)
+                    self.suggestion_items.append(text)
 
     def get_selected_box_index(self):
         return self.selected_index

@@ -236,13 +236,16 @@ class MainWindow(QMainWindow):
         if self.current_frame_data is not None:
             self.canvas.set_image(self.current_frame_data)
 
-            # Draw existing annotations for this frame
-            frame_anns = self.annotations.get(self.current_frame_idx, [])
-            self.canvas.draw_boxes(frame_anns, self.project_manager.categories)
+            # Draw existing annotations for this frame (hide if playing with model)
+            if not getattr(self, 'is_playing_with_model', False) or not self.is_playing:
+                frame_anns = self.annotations.get(self.current_frame_idx, [])
+                self.canvas.draw_boxes(frame_anns, self.project_manager.categories)
+            else:
+                self.canvas.clear_boxes()
 
             # Draw suggestions if any
             if self.pending_suggestions:
-                self.canvas.draw_suggestions([s['box'] for s in self.pending_suggestions])
+                self.canvas.draw_suggestions(self.pending_suggestions, self.project_manager.categories)
                 self.btn_confirm_sug.show()
             else:
                 self.btn_confirm_sug.hide()
@@ -273,8 +276,10 @@ class MainWindow(QMainWindow):
         # Clear old suggestions
         self.pending_suggestions = []
 
-        # Skip generating suggestions if the current frame already has annotations
-        if self.current_frame_idx in self.annotations and self.annotations[self.current_frame_idx]:
+        # Skip generating OpenCV tracking suggestions if the current frame already has annotations,
+        # BUT allow YOLO model predictions to run so we can visualize them.
+        is_playing_model = getattr(self, 'is_playing_with_model', False) and self.is_playing
+        if not is_playing_model and self.current_frame_idx in self.annotations and self.annotations[self.current_frame_idx]:
             return
 
         current_frame_img = self.video_processor.get_frame(self.current_frame_idx)
@@ -344,6 +349,15 @@ class MainWindow(QMainWindow):
 
     def toggle_play_model(self):
         if not self.video_processor: return
+
+        if not self.is_playing: # If we are about to start playing
+            project_name = self.project_manager.get_project_name()
+            best_model_path = self.project_manager.models_path / f"{project_name}_model" / "weights" / "best.pt"
+
+            if not best_model_path.exists():
+                QMessageBox.warning(self, "No Model Found", "Please train the YOLO model first by clicking 'Export YOLO Model'.")
+                return
+
         self.is_playing_with_model = True
         self._toggle_playback()
 
