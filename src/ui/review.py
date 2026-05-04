@@ -6,18 +6,19 @@ from PyQt6.QtCore import Qt
 import cv2
 
 class ReviewDialog(QDialog):
-    def __init__(self, main_window, parent=None):
+    def __init__(self, main_window, custom_annotations=None, title="Review Detected Objects", parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Review Detected Objects")
+        self.setWindowTitle(title)
         self.resize(800, 600)
 
         self.main_window = main_window
-        self.annotations = main_window.annotations
+        self.custom_annotations = custom_annotations
+        self.annotations = custom_annotations if custom_annotations is not None else main_window.annotations
         self.video_processor = main_window.video_processor
         self.project_manager = main_window.project_manager
 
         # Build dataset of crops
-        # items will be list of dicts: {'frame_idx': int, 'ann_idx': int, 'crop': cv2_image, 'class_id': int}
+        # items will be list of dicts: {'frame_idx': int, 'ann_idx': int, 'crop': cv2_image, 'class_id': int, 'delete': False}
         self.items = []
         self._extract_crops()
 
@@ -58,16 +59,31 @@ class ReviewDialog(QDialog):
         controls_layout = QHBoxLayout()
         lbl = QLabel("Assign selected to:")
         self.combo_category = QComboBox()
+
+        # Add an "Unknown" option for auto scan flexibility
+        self.combo_category.addItem("Unknown / Pending", -1)
         for i, name in sorted(self.project_manager.categories.items()):
             self.combo_category.addItem(name, i)
 
         btn_apply = QPushButton("Apply to Selected")
         btn_apply.clicked.connect(self.apply_to_selected)
 
+        btn_delete = QPushButton("Delete Selected")
+        btn_delete.setStyleSheet("background-color: darkred; color: white;")
+        btn_delete.clicked.connect(self.delete_selected)
+
         controls_layout.addWidget(lbl)
         controls_layout.addWidget(self.combo_category)
         controls_layout.addWidget(btn_apply)
+        controls_layout.addWidget(btn_delete)
         controls_layout.addStretch()
+
+        if self.custom_annotations is not None:
+            btn_finish = QPushButton("Commit Scan to Project")
+            btn_finish.setStyleSheet("background-color: darkgreen; color: white;")
+            btn_finish.clicked.connect(self.accept)
+            controls_layout.addWidget(btn_finish)
+
         layout.addLayout(controls_layout)
 
         # Scroll Area for Grid
@@ -96,6 +112,40 @@ class ReviewDialog(QDialog):
             w = CropWidget(item, self)
             self.grid.addWidget(w, row, col)
 
+    def delete_selected(self):
+        frames_to_save = set()
+        for i in range(self.grid.count()):
+            widget = self.grid.itemAt(i).widget()
+            if isinstance(widget, CropWidget) and widget.is_selected:
+                widget.item['delete'] = True
+                item = widget.item
+                # If we're working on the main annotations, remove it from there directly
+                if self.custom_annotations is None:
+                    # Mark the annotation in the main dictionary with a class_id of -1 so we can pop it safely
+                    self.annotations[item['frame_idx']][item['ann_idx']]['class_id'] = -1
+                    frames_to_save.add(item['frame_idx'])
+                else:
+                    # In custom/temp annotations (auto scan), just keep it as -1 so it's ignored on commit
+                    self.annotations[item['frame_idx']][item['ann_idx']]['class_id'] = -1
+
+        # Remove items flagged for deletion from UI
+        self.items = [item for item in self.items if not item.get('delete', False)]
+
+        # Cleanup main annotations if applicable
+        if self.custom_annotations is None:
+            for frame_idx in frames_to_save:
+                self.annotations[frame_idx] = [a for a in self.annotations[frame_idx] if a['class_id'] != -1]
+
+                # Autosave
+                orig_idx = self.main_window.current_frame_idx
+                self.main_window.current_frame_idx = frame_idx
+                self.main_window.current_frame_data = self.video_processor.get_frame(frame_idx)
+                self.main_window._save_current_frame_to_dataset()
+                self.main_window.current_frame_idx = orig_idx
+                self.main_window.current_frame_data = self.video_processor.get_frame(orig_idx)
+
+        self.populate_grid()
+
     def apply_to_selected(self):
         new_class_id = self.combo_category.currentData()
         if new_class_id is None:
@@ -108,19 +158,19 @@ class ReviewDialog(QDialog):
             if isinstance(widget, CropWidget) and widget.is_selected:
                 item = widget.item
                 item['class_id'] = new_class_id
-                self.main_window.annotations[item['frame_idx']][item['ann_idx']]['class_id'] = new_class_id
+                self.annotations[item['frame_idx']][item['ann_idx']]['class_id'] = new_class_id
                 frames_to_save.add(item['frame_idx'])
+                widget.is_selected = False
 
-        # Trigger autosave for modified frames
-        for frame_idx in frames_to_save:
-            # Temporarily set current frame idx to trick the autosave function
-            orig_idx = self.main_window.current_frame_idx
-            self.main_window.current_frame_idx = frame_idx
-            self.main_window.current_frame_data = self.video_processor.get_frame(frame_idx)
-            self.main_window._save_current_frame_to_dataset()
-            # Restore
-            self.main_window.current_frame_idx = orig_idx
-            self.main_window.current_frame_data = self.video_processor.get_frame(orig_idx)
+        # Trigger autosave for modified frames only if working on main annotations
+        if self.custom_annotations is None:
+            for frame_idx in frames_to_save:
+                orig_idx = self.main_window.current_frame_idx
+                self.main_window.current_frame_idx = frame_idx
+                self.main_window.current_frame_data = self.video_processor.get_frame(frame_idx)
+                self.main_window._save_current_frame_to_dataset()
+                self.main_window.current_frame_idx = orig_idx
+                self.main_window.current_frame_data = self.video_processor.get_frame(orig_idx)
 
         # Repopulate to reflect changes
         self.populate_grid()

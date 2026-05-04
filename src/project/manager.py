@@ -47,12 +47,17 @@ class ProjectManager:
 
     def _save_yaml(self):
         """Saves the data.yaml file required by YOLO."""
-        names_list = [self.categories[k] for k in sorted(self.categories.keys())] if self.categories else []
+        # Fix YOLO class ID out-of-bounds error when categories are deleted.
+        # Ensure 'names' map aligns strictly with keys as indices.
+        max_idx = max(self.categories.keys(), default=-1)
+        names_list = []
+        for i in range(max_idx + 1):
+            names_list.append(self.categories.get(i, f"deleted_class_{i}"))
 
         data = {
             'train': str(self.train_images_path.absolute()),
             'val': str(self.val_images_path.absolute()),
-            'nc': len(self.categories),
+            'nc': len(names_list),
             'names': names_list
         }
 

@@ -78,10 +78,15 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        self.btn_save = QPushButton("Save / Export")
+        self.btn_save = QPushButton("Save")
         self.btn_save.clicked.connect(self.export_dataset)
         self.btn_save.setStyleSheet("background-color: darkgreen; color: white;")
         toolbar.addWidget(self.btn_save)
+
+        self.btn_train = QPushButton("Export YOLO Model")
+        self.btn_train.clicked.connect(self.train_model)
+        self.btn_train.setStyleSheet("background-color: darkblue; color: white;")
+        toolbar.addWidget(self.btn_train)
 
         # Draw Tools Toolbar
         draw_toolbar = QToolBar("Drawing Tools")
@@ -408,6 +413,9 @@ class MainWindow(QMainWindow):
         progress = QProgressDialog("Scanning for motion...", "Cancel", 0, self.video_processor.total_frames, self)
         progress.setWindowModality(Qt.WindowModality.WindowModal)
 
+        # Temporary dict to hold scan results
+        temp_anns = {}
+
         for i in range(self.video_processor.total_frames):
             progress.setValue(i)
             QApplication.processEvents()
@@ -421,12 +429,40 @@ class MainWindow(QMainWindow):
 
             boxes = self.video_processor.detect_motion(frame)
             if boxes:
-                if i not in self.annotations:
-                    self.annotations[i] = []
+                temp_anns[i] = []
                 for b in boxes:
-                    self.annotations[i].append({'box': b, 'class_id': 0}) # default class
+                    temp_anns[i].append({'box': b, 'class_id': -1}) # -1 for unassigned
 
         progress.setValue(self.video_processor.total_frames)
+
+        if not temp_anns:
+            QMessageBox.information(self, "No Motion", "No moving objects detected.")
+            return
+
+        # Show review dialog for just the scanned items
+        from ui.review import ReviewDialog
+        dialog = ReviewDialog(self, custom_annotations=temp_anns, title="Review Auto Scan Results")
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Merge assigned items into main annotations
+            frames_to_save = set()
+            for frame_idx, anns in temp_anns.items():
+                for ann in anns:
+                    # Only merge if it was assigned a valid category (not -1 and not deleted)
+                    if ann['class_id'] != -1:
+                        if frame_idx not in self.annotations:
+                            self.annotations[frame_idx] = []
+                        self.annotations[frame_idx].append(ann)
+                        frames_to_save.add(frame_idx)
+
+            # Auto-save the merged frames
+            orig_idx = self.current_frame_idx
+            for f_idx in frames_to_save:
+                self.current_frame_idx = f_idx
+                self.current_frame_data = self.video_processor.get_frame(f_idx)
+                self._save_current_frame_to_dataset()
+            self.current_frame_idx = orig_idx
+            self.current_frame_data = self.video_processor.get_frame(orig_idx)
+
         self.show_frame()
 
     def auto_track(self):
@@ -537,3 +573,38 @@ class MainWindow(QMainWindow):
 
         progress.setValue(total_items)
         QMessageBox.information(self, "Done", "Project dataset saved successfully.")
+
+    def train_model(self):
+        from training.yolo_trainer import YoloTrainer
+
+        reply = QMessageBox.question(self, 'Export First?',
+                                     'Do you want to save the latest annotations to the dataset before training?',
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.export_dataset()
+
+        trainer = YoloTrainer(self.project_manager.project_path)
+
+        epochs = QInputDialog.getInt(self, "Training Settings", "Number of Epochs to train:", value=10, min=1, max=1000)
+        if not epochs[1]:
+            return
+
+        try:
+            progress = QProgressDialog("Training YOLO Model...", "Cancel", 0, epochs[0], self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+
+            def update_progress(current_epoch, total_epochs):
+                progress.setValue(current_epoch)
+                QApplication.processEvents()
+
+            best_model = trainer.train(
+                epochs=epochs[0],
+                project_name=self.project_manager.get_project_name(),
+                progress_callback=update_progress
+            )
+
+            progress.setValue(epochs[0])
+            QMessageBox.information(self, "Done", f"Training complete! Model saved to:\n{best_model}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Training failed:\n{str(e)}")
