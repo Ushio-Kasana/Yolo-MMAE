@@ -35,6 +35,7 @@ class MainWindow(QMainWindow):
         self.canvas = VideoCanvas()
         self.setCentralWidget(self.canvas)
         self.canvas.box_drawn.connect(self.on_box_drawn)
+        self.canvas.box_resized.connect(self.on_box_resized)
 
         # Top Toolbar
         toolbar = QToolBar("Main Toolbar")
@@ -66,6 +67,17 @@ class MainWindow(QMainWindow):
         self.btn_review = QPushButton("Review Groups")
         self.btn_review.clicked.connect(self.open_review_window)
         toolbar.addWidget(self.btn_review)
+
+        self.btn_bulk = QPushButton("Bulk Actions")
+        self.btn_bulk.clicked.connect(self.open_bulk_window)
+        toolbar.addWidget(self.btn_bulk)
+
+        toolbar.addSeparator()
+
+        self.btn_save = QPushButton("Save / Export")
+        self.btn_save.clicked.connect(self.export_dataset)
+        self.btn_save.setStyleSheet("background-color: darkgreen; color: white;")
+        toolbar.addWidget(self.btn_save)
 
         # Draw Tools Toolbar
         draw_toolbar = QToolBar("Drawing Tools")
@@ -215,6 +227,11 @@ class MainWindow(QMainWindow):
         self.annotations[self.current_frame_idx].append({'box': box, 'class_id': class_id})
         self.show_frame() # Refresh to show label
 
+    def on_box_resized(self, index, new_box):
+        if self.current_frame_idx in self.annotations and 0 <= index < len(self.annotations[self.current_frame_idx]):
+            self.annotations[self.current_frame_idx][index]['box'] = new_box
+            self.show_frame()
+
     def undo_last_box(self):
         if self.current_frame_idx in self.annotations and self.annotations[self.current_frame_idx]:
             self.annotations[self.current_frame_idx].pop()
@@ -334,6 +351,12 @@ class MainWindow(QMainWindow):
     def open_review_window(self):
         from ui.review import ReviewDialog
         dialog = ReviewDialog(self, self)
+        dialog.exec()
+        self.show_frame() # Refresh in case classes changed
+
+    def open_bulk_window(self):
+        from ui.bulk_action import BulkActionDialog
+        dialog = BulkActionDialog(self, self)
         dialog.exec()
         self.show_frame() # Refresh in case classes changed
 

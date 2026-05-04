@@ -61,8 +61,8 @@ class ReviewDialog(QDialog):
         for i, name in sorted(self.project_manager.categories.items()):
             self.combo_category.addItem(name, i)
 
-        btn_apply = QPushButton("Apply to All")
-        btn_apply.clicked.connect(self.apply_to_all)
+        btn_apply = QPushButton("Apply to Selected")
+        btn_apply.clicked.connect(self.apply_to_selected)
 
         controls_layout.addWidget(lbl)
         controls_layout.addWidget(self.combo_category)
@@ -93,38 +93,60 @@ class ReviewDialog(QDialog):
             col = idx % cols
 
             # Create a small widget for each crop
-            w = QWidget()
-            l = QVBoxLayout()
-            w.setLayout(l)
-
-            # Convert crop to QPixmap
-            crop = item['crop']
-            h, wid, ch = crop.shape
-            bytes_per_line = ch * wid
-            q_img = QImage(crop.data.tobytes(), wid, h, bytes_per_line, QImage.Format.Format_BGR888)
-            pixmap = QPixmap.fromImage(q_img).scaled(100, 100, Qt.AspectRatioMode.KeepAspectRatio)
-
-            img_lbl = QLabel()
-            img_lbl.setPixmap(pixmap)
-            l.addWidget(img_lbl)
-
-            # Label info
-            class_name = self.project_manager.categories.get(item['class_id'], "Unknown")
-            info_lbl = QLabel(f"Frame {item['frame_idx']} - {class_name}")
-            l.addWidget(info_lbl)
-
+            w = CropWidget(item, self)
             self.grid.addWidget(w, row, col)
 
-    def apply_to_all(self):
+    def apply_to_selected(self):
         new_class_id = self.combo_category.currentData()
         if new_class_id is None:
             return
 
-        for item in self.items:
-            # Update local memory
-            item['class_id'] = new_class_id
+        # Find all selected CropWidgets
+        for i in range(self.grid.count()):
+            widget = self.grid.itemAt(i).widget()
+            if isinstance(widget, CropWidget) and widget.is_selected:
+                item = widget.item
+                item['class_id'] = new_class_id
+                self.main_window.annotations[item['frame_idx']][item['ann_idx']]['class_id'] = new_class_id
 
-            # Update main window annotations
-            self.main_window.annotations[item['frame_idx']][item['ann_idx']]['class_id'] = new_class_id
-
+        # Repopulate to reflect changes
         self.populate_grid()
+
+class CropWidget(QWidget):
+    def __init__(self, item, parent=None):
+        super().__init__(parent)
+        self.item = item
+        self.is_selected = False
+
+        self.layout = QVBoxLayout()
+        self.setLayout(self.layout)
+
+        # Style
+        self.setStyleSheet("CropWidget { border: 2px solid transparent; }")
+
+        # Convert crop to QPixmap
+        crop = item['crop']
+        h, wid, ch = crop.shape
+        bytes_per_line = ch * wid
+        q_img = QImage(crop.data.tobytes(), wid, h, bytes_per_line, QImage.Format.Format_BGR888)
+        pixmap = QPixmap.fromImage(q_img).scaled(100, 100, Qt.AspectRatioMode.KeepAspectRatio)
+
+        self.img_lbl = QLabel()
+        self.img_lbl.setPixmap(pixmap)
+        self.layout.addWidget(self.img_lbl)
+
+        # Label info
+        # Assuming parent is ReviewDialog and has project_manager
+        pm = parent.project_manager if hasattr(parent, 'project_manager') else None
+        class_name = pm.categories.get(item['class_id'], "Unknown") if pm else "Unknown"
+        self.info_lbl = QLabel(f"F{item['frame_idx']} - {class_name}")
+        self.layout.addWidget(self.info_lbl)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.is_selected = not self.is_selected
+            if self.is_selected:
+                self.setStyleSheet("CropWidget { border: 2px solid blue; background-color: lightblue; }")
+            else:
+                self.setStyleSheet("CropWidget { border: 2px solid transparent; background-color: transparent; }")
+        super().mousePressEvent(event)
