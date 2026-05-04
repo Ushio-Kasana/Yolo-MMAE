@@ -101,7 +101,7 @@ class VideoCanvas(QGraphicsView):
                 # Create a semi-transparent black background for the text
                 text_bg = QGraphicsRectItem()
                 text_bg.setBrush(QColor(0, 0, 0, 150))
-                text_bg.setPen(Qt.PenStyle.NoPen)
+                text_bg.setPen(QPen(Qt.PenStyle.NoPen))
 
                 # Position text just above the box
                 text.setPos(x, y - 20 if y >= 20 else 0)
