@@ -54,9 +54,18 @@ class ProjectManager:
         for i in range(max_idx + 1):
             names_list.append(self.categories.get(i, f"deleted_class_{i}"))
 
+        # Check if validation images actually exist; if not, fallback to training images
+        # to prevent YOLO from crashing due to an empty dataset split.
+        # Ignore hidden files like .DS_Store
+        val_path = str(self.val_images_path.absolute())
+        has_val_images = any(f.is_file() and not f.name.startswith('.') for f in self.val_images_path.iterdir())
+
+        if not has_val_images:
+            val_path = str(self.train_images_path.absolute())
+
         data = {
             'train': str(self.train_images_path.absolute()),
-            'val': str(self.val_images_path.absolute()),
+            'val': val_path,
             'nc': len(names_list),
             'names': names_list
         }

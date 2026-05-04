@@ -670,6 +670,9 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.StandardButton.Yes:
             self.export_dataset()
 
+        # Force a rewrite of data.yaml to ensure empty validation paths fallback safely
+        self.project_manager._save_yaml()
+
         trainer = YoloTrainer(self.project_manager.project_path)
 
         epochs = QInputDialog.getInt(self, "Training Settings", "Number of Epochs to train:", value=10, min=1, max=1000)
