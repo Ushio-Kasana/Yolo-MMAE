@@ -595,7 +595,7 @@ class MainWindow(QMainWindow):
 
     def open_review_window(self):
         from ui.review import ReviewDialog
-        dialog = ReviewDialog(self, self)
+        dialog = ReviewDialog(self)
         dialog.exec()
         self.show_frame() # Refresh in case classes changed
 
