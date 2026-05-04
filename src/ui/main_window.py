@@ -114,30 +114,60 @@ class MainWindow(QMainWindow):
         # Bottom Frame Controls
         frame_dock = QDockWidget("Frame Controls", self)
         frame_widget = QWidget()
-        frame_layout = QHBoxLayout()
+        frame_layout = QVBoxLayout()
 
-        self.btn_prev = QPushButton("<< Prev Frame")
-        self.btn_prev.clicked.connect(self.prev_frame)
+        # Playback row
+        play_layout = QHBoxLayout()
+        self.btn_play = QPushButton("▶ Play")
+        self.btn_play.clicked.connect(self.toggle_play)
+
+        self.btn_play_model = QPushButton("▶ Play with Model")
+        self.btn_play_model.setStyleSheet("background-color: darkblue; color: white;")
+        self.btn_play_model.clicked.connect(self.toggle_play_model)
+
+        self.cb_auto_confirm = QCheckBox("Auto-Confirm Suggestions during Play")
 
         self.btn_confirm_sug = QPushButton("Confirm Suggestions (Enter)")
         self.btn_confirm_sug.setStyleSheet("background-color: darkcyan; color: white;")
         self.btn_confirm_sug.clicked.connect(self.confirm_suggestions)
         self.btn_confirm_sug.hide()
 
+        play_layout.addWidget(self.btn_play)
+        play_layout.addWidget(self.btn_play_model)
+        play_layout.addWidget(self.cb_auto_confirm)
+        play_layout.addWidget(self.btn_confirm_sug)
+        play_layout.addStretch()
+
+        # Scrubber row
+        scrub_layout = QHBoxLayout()
+        self.btn_prev = QPushButton("<<")
+        self.btn_prev.clicked.connect(self.prev_frame)
+
         self.lbl_frame = QLabel("Frame: 0 / 0")
-        self.btn_next = QPushButton("Next Frame >>")
+
+        self.btn_next = QPushButton(">>")
         self.btn_next.clicked.connect(self.next_frame)
 
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.valueChanged.connect(self.slider_moved)
 
-        frame_layout.addWidget(self.btn_prev)
-        frame_layout.addWidget(self.slider)
-        frame_layout.addWidget(self.btn_confirm_sug)
-        frame_layout.addWidget(self.lbl_frame)
-        frame_layout.addWidget(self.btn_next)
+        scrub_layout.addWidget(self.btn_prev)
+        scrub_layout.addWidget(self.slider)
+        scrub_layout.addWidget(self.lbl_frame)
+        scrub_layout.addWidget(self.btn_next)
+
+        frame_layout.addLayout(play_layout)
+        frame_layout.addLayout(scrub_layout)
+
         frame_widget.setLayout(frame_layout)
         frame_dock.setWidget(frame_widget)
+
+        # Timer for playback
+        self.play_timer = QTimer(self)
+        self.play_timer.timeout.connect(self.advance_playback)
+        self.is_playing = False
+        self.is_playing_with_model = False
+        self.cached_yolo_model = None
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, frame_dock)
 
         # Right Sidebar - Categories
@@ -243,34 +273,57 @@ class MainWindow(QMainWindow):
         # Clear old suggestions
         self.pending_suggestions = []
 
-        # We need the previous frame and its annotations to track forward
-        prev_idx = self.current_frame_idx - 1
-        if prev_idx < 0 or prev_idx not in self.annotations or not self.annotations[prev_idx]:
-            return
-
-        # Also skip generating suggestions if the current frame already has annotations
-        # to avoid double-stacking boxes when reviewing already-completed frames
+        # Skip generating suggestions if the current frame already has annotations
         if self.current_frame_idx in self.annotations and self.annotations[self.current_frame_idx]:
             return
-
-        prev_frame = self.video_processor.get_frame(prev_idx)
-        if prev_frame is None:
-            return
-
-        boxes = [ann['box'] for ann in self.annotations[prev_idx]]
-        class_ids = [ann['class_id'] for ann in self.annotations[prev_idx]]
-
-        self.tracker.init_trackers(prev_frame, boxes)
 
         current_frame_img = self.video_processor.get_frame(self.current_frame_idx)
         if current_frame_img is None:
             return
 
-        new_boxes = self.tracker.update(current_frame_img)
+        # 1. Try to use trained YOLO Model if running in "Play with Model" mode
+        if getattr(self, 'is_playing_with_model', False):
+            project_name = self.project_manager.get_project_name()
+            best_model_path = self.project_manager.models_path / f"{project_name}_model" / "weights" / "best.pt"
 
-        for idx, box in enumerate(new_boxes):
-            if box is not None:
-                self.pending_suggestions.append({'box': box, 'class_id': class_ids[idx]})
+            if best_model_path.exists():
+                if self.cached_yolo_model is None:
+                    from ultralytics import YOLO
+                    self.cached_yolo_model = YOLO(str(best_model_path))
+
+                # Predict
+                results = self.cached_yolo_model(current_frame_img, verbose=False)
+
+                for r in results:
+                    boxes = r.boxes
+                    for box in boxes:
+                        # Convert xyxy to xywh
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        w = x2 - x1
+                        h = y2 - y1
+                        cls_id = int(box.cls[0].item())
+
+                        self.pending_suggestions.append({'box': (int(x1), int(y1), int(w), int(h)), 'class_id': cls_id})
+                return
+            else:
+                self._toggle_playback()
+                QMessageBox.warning(self, "No Model Found", "Please train the YOLO model first by clicking 'Export YOLO Model'.")
+                return
+
+        # 2. Fallback to standard OpenCV CSRT tracking from previous consecutive frame
+        prev_idx = self.current_frame_idx - 1
+        if prev_idx >= 0 and prev_idx in self.annotations and self.annotations[prev_idx]:
+            prev_frame = self.video_processor.get_frame(prev_idx)
+            if prev_frame is not None:
+                boxes = [ann['box'] for ann in self.annotations[prev_idx]]
+                class_ids = [ann['class_id'] for ann in self.annotations[prev_idx]]
+
+                self.tracker.init_trackers(prev_frame, boxes)
+                new_boxes = self.tracker.update(current_frame_img)
+
+                for idx, box in enumerate(new_boxes):
+                    if box is not None:
+                        self.pending_suggestions.append({'box': box, 'class_id': class_ids[idx]})
 
     def next_frame(self):
         if self.video_processor and self.current_frame_idx < self.video_processor.total_frames - 1:
@@ -283,6 +336,39 @@ class MainWindow(QMainWindow):
         if self.video_processor and self.current_frame_idx > 0:
             self.current_frame_idx -= 1
             self.show_frame()
+
+    def toggle_play(self):
+        if not self.video_processor: return
+        self.is_playing_with_model = False
+        self._toggle_playback()
+
+    def toggle_play_model(self):
+        if not self.video_processor: return
+        self.is_playing_with_model = True
+        self._toggle_playback()
+
+    def _toggle_playback(self):
+        if self.is_playing:
+            self.play_timer.stop()
+            self.is_playing = False
+            self.btn_play.setText("▶ Play")
+            self.btn_play_model.setText("▶ Play with Model")
+        else:
+            fps = self.video_processor.fps if self.video_processor.fps > 0 else 30
+            self.play_timer.start(int(1000 / fps))
+            self.is_playing = True
+            if self.is_playing_with_model:
+                self.btn_play_model.setText("⏸ Pause")
+            else:
+                self.btn_play.setText("⏸ Pause")
+
+    def advance_playback(self):
+        if self.video_processor and self.current_frame_idx < self.video_processor.total_frames - 1:
+            self.next_frame()
+            if self.cb_auto_confirm.isChecked() and self.pending_suggestions:
+                self.confirm_suggestions()
+        else:
+            self._toggle_playback() # Stop at end
 
     def slider_moved(self, value):
         self.current_frame_idx = value
@@ -603,6 +689,9 @@ class MainWindow(QMainWindow):
                 project_name=self.project_manager.get_project_name(),
                 progress_callback=update_progress
             )
+
+            # Invalidate cached model so next run uses freshly trained weights
+            self.cached_yolo_model = None
 
             progress.setValue(epochs[0])
             QMessageBox.information(self, "Done", f"Training complete! Model saved to:\n{best_model}")
