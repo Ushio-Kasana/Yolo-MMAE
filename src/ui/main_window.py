@@ -600,7 +600,6 @@ class MainWindow(QMainWindow):
         self.annotations[self.current_frame_idx].append({'box': box, 'class_id': class_id})
         self._save_current_frame_to_dataset()
         self.show_frame() # Refresh to show label
-        self._prompt_auto_fix(box, class_id)
 
     def on_box_resized(self, index, new_box):
         if self.current_frame_idx in self.annotations and 0 <= index < len(self.annotations[self.current_frame_idx]):
