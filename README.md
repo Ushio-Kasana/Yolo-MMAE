@@ -37,8 +37,17 @@ python src/main.py
 
 ## 📖 Usage Guide
 
-### 1. Project Setup
+### 1. Project Setup & Resuming Work
 When launching the app, you will be prompted to create an empty folder for your project or select an existing one. The application will automatically construct a standard YOLO dataset directory (`dataset/images/train`, `dataset/labels/train`, and `data.yaml`) inside this folder.
+
+**How to resume an existing project:**
+If you close the application and want to continue editing where you left off:
+1. Open the application and select your existing Project folder.
+2. Click **Load Video** and select the *exact same* original video file you were working on.
+3. Click the **Restore Images** button in the top toolbar.
+4. Select your media source from the dropdown menu.
+5. The application will ask if you want to overlay annotations on the current media. **Select Yes**.
+6. All your previously drawn bounding boxes will be un-normalized from the YOLO `.txt` files and instantly placed back onto the video timeline as editable boxes!
 
 ### 2. Annotation & Drawing
 Load a video using the top toolbar. On the right panel, click **Add Category** to create classes (e.g., "Car", "Pedestrian").
@@ -57,3 +66,13 @@ Once the model is trained, click **Play with Model**. The application will strea
 
 ## ⚙️ Hardware Acceleration
 Click the **⚙ Settings** button in the top right. Click **Run Live Benchmark** to have the application stress-test your CPU and GPU to find the fastest compute device and the maximum stable VRAM batch size to prevent Out-Of-Memory crashes during training.
+
+---
+
+## 🗺️ Known Issues & Roadmap
+
+The following features are currently being worked on or need to be addressed in future releases:
+* **Restoring images from a specific category:** Currently, restoration loads all categories. Future updates will allow precise filtering.
+* **UI Performance:** Fix some spikes in menus and application freezing or stuttering during heavy OpenCV or PyTorch background tasks.
+* **Auto-Benchmarking:** Fix the auto benchmarking utility to work correctly and yield more reliable heuristics across varied hardware.
+* **Cross-Platform Compatibility:** Fully test and guarantee support for Windows and Linux environments.
