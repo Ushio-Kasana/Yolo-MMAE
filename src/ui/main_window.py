@@ -742,15 +742,32 @@ class MainWindow(QMainWindow):
 
         current_anns = self.annotations[self.current_frame_idx]
         if not current_anns:
+            QMessageBox.information(self, "No Annotations", "No bounding boxes on the current frame to track.")
             return
 
-        boxes = [ann['box'] for ann in current_anns]
-        class_ids = [ann['class_id'] for ann in current_anns]
+        from ui.auto_track import AutoTrackDialog
+        dialog = AutoTrackDialog(self.project_manager.categories, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
 
-        self.tracker.init_trackers(self.current_frame_data, boxes)
+        target_categories = set(dialog.selected_categories)
+
+        # Filter initial boxes based on target categories
+        active_boxes = []
+        active_class_ids = []
+        for ann in current_anns:
+            if ann['class_id'] in target_categories:
+                active_boxes.append(ann['box'])
+                active_class_ids.append(ann['class_id'])
+
+        if not active_boxes:
+            QMessageBox.information(self, "No Matches", "No boxes found on this frame matching the selected categories.")
+            return
+
+        self.tracker.init_trackers(self.current_frame_data, active_boxes)
 
         total_steps = self.video_processor.total_frames - self.current_frame_idx
-        progress = QProgressDialog("Tracking objects...", "Cancel", 0, total_steps, self)
+        progress = QProgressDialog("Smart Tracking objects...", "Cancel", 0, total_steps, self)
         progress.setWindowModality(Qt.WindowModality.WindowModal)
 
         step = 0
@@ -765,14 +782,41 @@ class MainWindow(QMainWindow):
             if frame is None:
                 break
 
-            new_boxes = self.tracker.update(frame)
+            # Smart Look-Ahead:
+            # If the user has explicitly drawn a box for a tracked class on this frame,
+            # we should use that manual box as the new ground truth to re-initialize the tracker
+            # preventing drift across long videos.
+            needs_reinit = False
+
+            if i in self.annotations and self.annotations[i]:
+                frame_anns = self.annotations[i]
+                for idx, cls_id in enumerate(active_class_ids):
+                    # Check if user manually annotated this class on this frame
+                    manual_boxes = [a['box'] for a in frame_anns if a['class_id'] == cls_id]
+                    if manual_boxes:
+                        # Assuming 1 instance per class for simplicity in this auto-fix logic
+                        # Re-assign the active box to the manual truth
+                        active_boxes[idx] = manual_boxes[0]
+                        needs_reinit = True
+
+            if needs_reinit:
+                self.tracker.init_trackers(frame, active_boxes)
+                # Skip normal update this frame since we just initialized exactly here
+                new_boxes = active_boxes
+            else:
+                new_boxes = self.tracker.update(frame)
+                active_boxes = [b if b is not None else active_boxes[idx] for idx, b in enumerate(new_boxes)]
 
             if i not in self.annotations:
                 self.annotations[i] = []
 
+            # Remove any older auto-tracked boxes of these classes to overwrite cleanly
+            self.annotations[i] = [a for a in self.annotations[i] if a['class_id'] not in target_categories]
+
             for idx, box in enumerate(new_boxes):
                 if box is not None:
-                    self.annotations[i].append({'box': box, 'class_id': class_ids[idx]})
+                    self.annotations[i].append({'box': box, 'class_id': active_class_ids[idx]})
+
             step += 1
 
         progress.setValue(total_steps)
