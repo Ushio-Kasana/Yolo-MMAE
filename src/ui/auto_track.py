@@ -79,7 +79,7 @@ class AutoTrackDialog(QDialog):
         if self.rad_all.isChecked():
             self.selected_categories = list(self.categories.keys())
         else:
-            self.selected_categories = [cid for cls_id, cb in self.checkboxes.items() if cb.isChecked()]
+            self.selected_categories = [cls_id for cls_id, cb in self.checkboxes.items() if cb.isChecked()]
             if not self.selected_categories:
                 QMessageBox.warning(self, "No Selection", "Please select at least one category to track.")
                 return
