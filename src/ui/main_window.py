@@ -392,7 +392,7 @@ class MainWindow(QMainWindow):
             return
 
         # 1. Try to use trained YOLO Model if running in "Play with Model" mode
-        if getattr(self, 'is_playing_with_model', False):
+        if getattr(self, 'is_playing_with_model', False) and self.is_playing:
             project_name = self.project_manager.get_project_name()
             best_model_path = self.project_manager.models_path / f"{project_name}_model" / "weights" / "best.pt"
 
@@ -529,6 +529,70 @@ class MainWindow(QMainWindow):
         img_name = f"frame_{frame_idx:06d}.jpg"
         self.project_manager.save_annotation(img_name, self.current_frame_data, yolo_anns)
 
+    def _prompt_auto_fix(self, box, class_id):
+        if not self.video_processor or self.current_frame_idx >= self.video_processor.total_frames - 1:
+            return
+
+        reply = QMessageBox.question(self, 'Auto-Fix Sequence',
+                                     'You adjusted a box. Do you want to automatically propagate this fix to subsequent frames?',
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            total_steps = self.video_processor.total_frames - self.current_frame_idx - 1
+            progress = QProgressDialog("Auto-fixing subsequent frames...", "Cancel", 0, total_steps, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+
+            self.tracker.init_trackers(self.current_frame_data, [box])
+
+            step = 0
+            frames_to_save = set()
+            for i in range(self.current_frame_idx + 1, self.video_processor.total_frames):
+                progress.setValue(step)
+                QApplication.processEvents()
+
+                if progress.wasCanceled():
+                    break
+
+                frame = self.video_processor.get_frame(i)
+                if frame is None:
+                    break
+
+                new_boxes = self.tracker.update(frame)
+                new_box = new_boxes[0]
+
+                if new_box is not None:
+                    # Update or add the box to this frame
+                    if i not in self.annotations:
+                        self.annotations[i] = []
+
+                    # Find if a box of this class already exists to replace, otherwise append
+                    found = False
+                    for ann in self.annotations[i]:
+                        if ann['class_id'] == class_id:
+                            ann['box'] = new_box
+                            found = True
+                            break
+
+                    if not found:
+                        self.annotations[i].append({'box': new_box, 'class_id': class_id})
+
+                    frames_to_save.add(i)
+                step += 1
+
+            progress.setValue(total_steps)
+
+            # Trigger autosave for modified frames
+            orig_idx = self.current_frame_idx
+            orig_data = self.current_frame_data
+            for f_idx in frames_to_save:
+                self.current_frame_idx = f_idx
+                self.current_frame_data = self.video_processor.get_frame(f_idx)
+                self._save_current_frame_to_dataset()
+            self.current_frame_idx = orig_idx
+            self.current_frame_data = orig_data
+
+            QMessageBox.information(self, "Done", f"Successfully auto-fixed {len(frames_to_save)} frames.")
+
     def on_box_drawn(self, box):
         class_id = self.get_selected_class_id()
         if self.current_frame_idx not in self.annotations:
@@ -536,12 +600,15 @@ class MainWindow(QMainWindow):
         self.annotations[self.current_frame_idx].append({'box': box, 'class_id': class_id})
         self._save_current_frame_to_dataset()
         self.show_frame() # Refresh to show label
+        self._prompt_auto_fix(box, class_id)
 
     def on_box_resized(self, index, new_box):
         if self.current_frame_idx in self.annotations and 0 <= index < len(self.annotations[self.current_frame_idx]):
+            class_id = self.annotations[self.current_frame_idx][index]['class_id']
             self.annotations[self.current_frame_idx][index]['box'] = new_box
             self._save_current_frame_to_dataset()
             self.show_frame()
+            self._prompt_auto_fix(new_box, class_id)
 
     def undo_last_box(self):
         if self.current_frame_idx in self.annotations and self.annotations[self.current_frame_idx]:

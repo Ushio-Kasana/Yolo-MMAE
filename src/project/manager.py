@@ -1,5 +1,6 @@
 import os
 import yaml
+import json
 import shutil
 from pathlib import Path
 
@@ -72,6 +73,12 @@ class ProjectManager:
 
         with open(self.yaml_path, 'w') as f:
             yaml.dump(data, f, default_flow_style=False)
+
+        # Export a generic JSON labels file alongside it in the models directory
+        json_path = self.models_path / "labels.json"
+        json_data = {str(i): name for i, name in enumerate(names_list)}
+        with open(json_path, 'w') as f:
+            json.dump(json_data, f, indent=4)
 
     def load_categories(self):
         """Loads categories from data.yaml."""
