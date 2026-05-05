@@ -81,3 +81,4 @@ The following features are currently being worked on or need to be addressed in 
 * **UI Performance:** Fix some spikes in menus and application freezing or stuttering during heavy OpenCV or PyTorch background tasks.
 * **Auto-Benchmarking:** Fix the auto benchmarking utility to work correctly and yield more reliable heuristics across varied hardware.
 * **Cross-Platform Compatibility:** Fully test and guarantee support for Windows and Linux environments.
+* **Light Mode vs Dark Mode Support:** Fix CSS and visual elements for users running macOS/Windows in Light Mode. Currently, when using Light Mode, the white outlines on the Review Group menu blend into the background, making it difficult to see boxes and selected objects.
