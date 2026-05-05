@@ -22,6 +22,8 @@ class ReviewDialog(QDialog):
         self.items = []
         self._extract_crops()
 
+        self.last_selected_index = None
+
         self.init_ui()
 
     def _extract_crops(self):
@@ -113,8 +115,25 @@ class ReviewDialog(QDialog):
             col = idx % cols
 
             # Create a small widget for each crop
-            w = CropWidget(item, self)
+            w = CropWidget(item, idx, self)
             self.grid.addWidget(w, row, col)
+
+    def handle_widget_click(self, clicked_idx, shift_pressed):
+        if shift_pressed and self.last_selected_index is not None:
+            # Select range
+            start = min(self.last_selected_index, clicked_idx)
+            end = max(self.last_selected_index, clicked_idx)
+
+            # Find the state we are trying to set (based on the widget just clicked)
+            # Actually, standard behavior is to just set everything in range to True
+            for i in range(self.grid.count()):
+                widget = self.grid.itemAt(i).widget()
+                if isinstance(widget, CropWidget):
+                    if start <= widget.grid_index <= end:
+                        widget.set_selected(True)
+        else:
+            # Normal click was already handled by the widget itself, just update last index
+            self.last_selected_index = clicked_idx
 
     def add_new_category(self):
         name, ok = QInputDialog.getText(self, "New Category", "Category Name:")
@@ -199,9 +218,11 @@ class ReviewDialog(QDialog):
         self.populate_grid()
 
 class CropWidget(QWidget):
-    def __init__(self, item, parent=None):
+    def __init__(self, item, grid_index, parent=None):
         super().__init__(parent)
+        self.parent_dialog = parent
         self.item = item
+        self.grid_index = grid_index
         self.is_selected = False
 
         # Required for QWidget subclasses to paint custom CSS backgrounds/borders
@@ -231,11 +252,21 @@ class CropWidget(QWidget):
         self.info_lbl = QLabel(f"F{item['frame_idx']} - {class_name}")
         self.layout.addWidget(self.info_lbl)
 
+    def set_selected(self, state):
+        self.is_selected = state
+        if self.is_selected:
+            self.setStyleSheet("CropWidget { border: 3px solid white; background-color: rgba(255, 255, 255, 50); }")
+        else:
+            self.setStyleSheet("CropWidget { border: 2px solid transparent; background-color: transparent; }")
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.is_selected = not self.is_selected
-            if self.is_selected:
-                self.setStyleSheet("CropWidget { border: 3px solid white; background-color: rgba(255, 255, 255, 50); }")
-            else:
-                self.setStyleSheet("CropWidget { border: 2px solid transparent; background-color: transparent; }")
+            shift_pressed = (event.modifiers() == Qt.KeyboardModifier.ShiftModifier)
+
+            if not shift_pressed:
+                self.set_selected(not self.is_selected)
+
+            if self.parent_dialog and hasattr(self.parent_dialog, 'handle_widget_click'):
+                self.parent_dialog.handle_widget_click(self.grid_index, shift_pressed)
+
         super().mousePressEvent(event)
