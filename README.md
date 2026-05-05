@@ -14,6 +14,11 @@ A powerful, hardware-accelerated desktop application built with Python, PyQt6, a
 * **Hardware Benchmarking**: Includes a built-in Settings menu to explicitly target CPU, Nvidia CUDA, or Apple Metal (MPS). Run the **Live Benchmark** to automatically determine the safest Batch Size and Worker thread limits for your specific hardware.
 * **Model Exporter**: Convert your trained `.pt` PyTorch model into `ONNX`, `TF.js`, `CoreML`, and more with a single click.
 
+## 💻 Compatible Systems
+* Tested on Mac OS Tahoe 26.4
+* Windows not tested
+* Linux not tested
+
 ## 🛠 Installation
 
 ### Prerequisites
