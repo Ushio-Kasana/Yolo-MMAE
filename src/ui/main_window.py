@@ -103,6 +103,15 @@ class MainWindow(QMainWindow):
         self.btn_convert.setStyleSheet("background-color: purple; color: white;")
         toolbar.addWidget(self.btn_convert)
 
+        # Spacer widget to push settings to the right
+        spacer = QWidget()
+        spacer.setSizePolicy(spacer.sizePolicy().Policy.Expanding, spacer.sizePolicy().Policy.Preferred)
+        toolbar.addWidget(spacer)
+
+        self.btn_settings = QPushButton("⚙ Settings")
+        self.btn_settings.clicked.connect(self.open_settings)
+        toolbar.addWidget(self.btn_settings)
+
         # Draw Tools Toolbar
         draw_toolbar = QToolBar("Drawing Tools")
         self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, draw_toolbar)
@@ -183,6 +192,20 @@ class MainWindow(QMainWindow):
         self.is_playing = False
         self.is_playing_with_model = False
         self.cached_yolo_model = None
+
+        # Load default hardware settings
+        import torch
+        best_device = 'cpu'
+        if torch.cuda.is_available():
+            best_device = 'cuda:0'
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            best_device = 'mps'
+
+        self.app_settings = {
+            'train_device': best_device,
+            'inference_device': best_device
+        }
+
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, frame_dock)
 
         # Right Sidebar - Categories
@@ -400,9 +423,10 @@ class MainWindow(QMainWindow):
                 if self.cached_yolo_model is None:
                     from ultralytics import YOLO
                     self.cached_yolo_model = YOLO(str(best_model_path))
+                    self.cached_yolo_model.to(self.app_settings['inference_device'])
 
                 # Predict
-                results = self.cached_yolo_model(current_frame_img, verbose=False)
+                results = self.cached_yolo_model(current_frame_img, verbose=False, device=self.app_settings['inference_device'])
 
                 for r in results:
                     boxes = r.boxes
@@ -834,6 +858,14 @@ class MainWindow(QMainWindow):
         dialog.exec()
         self.show_frame() # Refresh in case classes changed
 
+    def open_settings(self):
+        from ui.settings import SettingsDialog
+        dialog = SettingsDialog(self.app_settings, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.app_settings = dialog.settings
+            # Invalidate cached model so it reloads on the new inference device if changed
+            self.cached_yolo_model = None
+
     def export_dataset(self):
         if not self.video_processor:
             return
@@ -959,7 +991,8 @@ class MainWindow(QMainWindow):
                 epochs=epochs[0],
                 project_name=self.project_manager.get_project_name(),
                 progress_callback=update_progress,
-                pretrained=use_pretrained
+                pretrained=use_pretrained,
+                device=self.app_settings['train_device']
             )
 
             # Invalidate cached model so next run uses freshly trained weights
