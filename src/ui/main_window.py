@@ -49,6 +49,16 @@ class MainWindow(QMainWindow):
         self.btn_load_video.clicked.connect(self.load_video)
         toolbar.addWidget(self.btn_load_video)
 
+        self.btn_restore = QPushButton("Restore Images")
+        self.btn_restore.clicked.connect(self.restore_project_images)
+        self.btn_restore.setStyleSheet("background-color: darkorange; color: white;")
+        toolbar.addWidget(self.btn_restore)
+
+        self.btn_unload = QPushButton("Unload Media")
+        self.btn_unload.clicked.connect(self.unload_media)
+        self.btn_unload.setStyleSheet("color: red;")
+        toolbar.addWidget(self.btn_unload)
+
         self.cb_load_full = QCheckBox("Load Full Video")
         toolbar.addWidget(self.cb_load_full)
 
@@ -231,7 +241,97 @@ class MainWindow(QMainWindow):
             self.video_processor = VideoProcessor(path, self.cb_load_full.isChecked())
             self.slider.setMaximum(self.video_processor.total_frames - 1)
             self.current_frame_idx = 0
+            self.annotations = {} # Clear annotations for new media
             self.show_frame()
+
+    def restore_project_images(self):
+        train_path = self.project_manager.train_images_path
+        if not train_path.exists() or not list(train_path.glob("*.jpg")):
+            QMessageBox.information(self, "No Images", "No exported images found in the dataset to restore.")
+            return
+
+        # Optional: Ask user to filter by category or restore all
+        cat_choices = ["All Categories"] + [f"{i}: {name}" for i, name in sorted(self.project_manager.categories.items())]
+        item, ok = QInputDialog.getItem(self, "Restore Project", "Select category to restore:", cat_choices, 0, False)
+        if not ok:
+            return
+
+        target_class_id = -1
+        if item != "All Categories":
+            target_class_id = int(item.split(":")[0])
+
+        # Collect paths to load
+        from video.processor import ImageSequenceProcessor
+
+        valid_image_paths = []
+        labels_path = self.project_manager.train_labels_path
+
+        for img_file in sorted(train_path.glob("*.jpg")):
+            label_file = labels_path / (img_file.stem + ".txt")
+            if not label_file.exists():
+                if target_class_id == -1:
+                    valid_image_paths.append(img_file)
+                continue
+
+            has_target = False
+            with open(label_file, 'r') as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if parts:
+                        if target_class_id == -1 or int(parts[0]) == target_class_id:
+                            has_target = True
+                            break
+            if has_target:
+                valid_image_paths.append(img_file)
+
+        if not valid_image_paths:
+            QMessageBox.information(self, "No Matches", "No images found matching that category.")
+            return
+
+        self.unload_media()
+        self.video_processor = ImageSequenceProcessor(valid_image_paths)
+        self.slider.setMaximum(self.video_processor.total_frames - 1)
+
+        # Repopulate annotations by reading .txt files and un-normalizing
+        for idx, img_path in enumerate(valid_image_paths):
+            label_file = labels_path / (img_path.stem + ".txt")
+            if label_file.exists():
+                img = cv2.imread(str(img_path))
+                if img is None: continue
+                img_h, img_w = img.shape[:2]
+
+                self.annotations[idx] = []
+                with open(label_file, 'r') as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if len(parts) >= 5:
+                            cls_id = int(parts[0])
+                            x_c, y_c, nw, nh = map(float, parts[1:5])
+
+                            # un-normalize
+                            w = nw * img_w
+                            h = nh * img_h
+                            x = (x_c * img_w) - (w / 2)
+                            y = (y_c * img_h) - (h / 2)
+
+                            self.annotations[idx].append({
+                                'box': (int(x), int(y), int(w), int(h)),
+                                'class_id': cls_id
+                            })
+
+        self.show_frame()
+
+    def unload_media(self):
+        if self.video_processor:
+            self.video_processor.release()
+            self.video_processor = None
+        self.canvas.clear_boxes()
+        self.canvas.set_image(None)
+        self.annotations = {}
+        self.current_frame_idx = 0
+        self.lbl_frame.setText("Frame: 0 / 0")
+        self.slider.setMaximum(0)
+        self.slider.setValue(0)
 
     def show_frame(self):
         if not self.video_processor:
@@ -727,6 +827,12 @@ class MainWindow(QMainWindow):
 
         trainer = YoloTrainer(self.project_manager.project_path)
 
+        reply_pretrained = QMessageBox.question(self, 'Training Base',
+                                     'Do you want to use a pre-trained base model? (Recommended for speed and accuracy).\n\nSelect "No" to train completely from scratch.',
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        use_pretrained = (reply_pretrained == QMessageBox.StandardButton.Yes)
+
         epochs = QInputDialog.getInt(self, "Training Settings", "Number of Epochs to train:", value=10, min=1, max=1000)
         if not epochs[1]:
             return
@@ -742,7 +848,8 @@ class MainWindow(QMainWindow):
             best_model = trainer.train(
                 epochs=epochs[0],
                 project_name=self.project_manager.get_project_name(),
-                progress_callback=update_progress
+                progress_callback=update_progress,
+                pretrained=use_pretrained
             )
 
             # Invalidate cached model so next run uses freshly trained weights

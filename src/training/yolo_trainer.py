@@ -12,15 +12,17 @@ class YoloTrainer:
 
         self.models_path.mkdir(parents=True, exist_ok=True)
 
-    def train(self, epochs=10, imgsz=640, project_name="my_project", progress_callback=None):
+    def train(self, epochs=10, imgsz=640, project_name="my_project", progress_callback=None, pretrained=True):
         """
-        Trains YOLOv8n model on the saved dataset.
+        Trains YOLOv8 model on the saved dataset.
         Returns the path to the best trained model weights.
         """
         if not self.yaml_path.exists():
             raise FileNotFoundError(f"Dataset YAML not found at {self.yaml_path}")
 
-        model = YOLO('yolov8n.pt') # Start from pretrained weights
+        # Start from pretrained weights or from scratch (yaml config)
+        model_target = 'yolov8n.pt' if pretrained else 'yolov8n.yaml'
+        model = YOLO(model_target)
 
         # Inject custom callback if provided
         if progress_callback:
