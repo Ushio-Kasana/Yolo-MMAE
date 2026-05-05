@@ -66,6 +66,12 @@ class VideoCanvas(QGraphicsView):
 
         self.pixmap_item.setPixmap(pixmap)
         self.scene.setSceneRect(0, 0, width, height)
+        self.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.scene.sceneRect().isValid():
+            self.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
     def clear_boxes(self):
         for item in self.rect_items:
