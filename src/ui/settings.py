@@ -140,8 +140,13 @@ class SettingsDialog(QDialog):
 
         # Buttons
         btn_layout = QHBoxLayout()
-        btn_benchmark = QPushButton("Auto-Detect / Benchmark")
-        btn_benchmark.clicked.connect(self.run_benchmark)
+
+        btn_detect = QPushButton("Auto-Detect Hardware")
+        btn_detect.clicked.connect(self.run_auto_detect)
+
+        btn_bench = QPushButton("Run Live Benchmark")
+        btn_bench.setStyleSheet("background-color: darkorange; color: white;")
+        btn_bench.clicked.connect(self.run_live_benchmark)
 
         btn_save = QPushButton("Save Settings")
         btn_save.setStyleSheet("background-color: darkblue; color: white;")
@@ -150,7 +155,8 @@ class SettingsDialog(QDialog):
         btn_cancel = QPushButton("Cancel")
         btn_cancel.clicked.connect(self.reject)
 
-        btn_layout.addWidget(btn_benchmark)
+        btn_layout.addWidget(btn_detect)
+        btn_layout.addWidget(btn_bench)
         btn_layout.addStretch()
         btn_layout.addWidget(btn_cancel)
         btn_layout.addWidget(btn_save)
@@ -158,7 +164,7 @@ class SettingsDialog(QDialog):
         layout.addLayout(btn_layout)
         self.setLayout(layout)
 
-    def run_benchmark(self):
+    def run_auto_detect(self):
         import multiprocessing
         import psutil
 
@@ -209,6 +215,112 @@ class SettingsDialog(QDialog):
                                 f"Estimated Memory: {vram_gb:.1f} GB\n"
                                 f"CPU Cores: {cores}\n\n"
                                 f"Settings updated to safe maximums.")
+
+    def run_live_benchmark(self):
+        import time
+        from PyQt6.QtWidgets import QProgressDialog, QMessageBox, QApplication
+
+        devices_to_test = [d[1] for d in self.available_devices]
+        if not devices_to_test:
+            return
+
+        progress = QProgressDialog("Running synthetic tensor benchmark...", "Cancel", 0, len(devices_to_test) + 1, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.show()
+
+        results = {}
+
+        # Test 1: Device speed (Matrix Multiplication)
+        for idx, dev in enumerate(devices_to_test):
+            progress.setValue(idx)
+            progress.setLabelText(f"Benchmarking device: {dev.upper()}")
+            QApplication.processEvents()
+
+            if progress.wasCanceled():
+                return
+
+            try:
+                # Create a moderately sized tensor
+                size = 4000
+                t1 = torch.randn(size, size, device=dev)
+                t2 = torch.randn(size, size, device=dev)
+
+                # Warmup (important for GPUs/MPS)
+                for _ in range(3):
+                    _ = torch.matmul(t1, t2)
+
+                if dev == 'cuda:0': torch.cuda.synchronize()
+
+                # Timed run
+                start_time = time.time()
+                for _ in range(10):
+                    _ = torch.matmul(t1, t2)
+                if dev == 'cuda:0': torch.cuda.synchronize()
+                end_time = time.time()
+
+                results[dev] = end_time - start_time
+
+                # Free memory
+                del t1, t2
+                if dev == 'cuda:0': torch.cuda.empty_cache()
+
+            except Exception as e:
+                print(f"Benchmark failed on {dev}: {e}")
+                results[dev] = float('inf') # Penalize failed devices
+
+        # Find fastest device
+        fastest_device = min(results, key=results.get)
+
+        progress.setValue(len(devices_to_test))
+        progress.setLabelText(f"Finding optimal batch size for {fastest_device.upper()}...")
+        QApplication.processEvents()
+
+        # Test 2: Batch Size Memory Limits on fastest device
+        best_batch = 8
+        try:
+            # Simulate a forward pass memory allocation loosely similar to YOLO
+            # 640x640x3 image batch through a few dummy conv layers
+            dummy_conv = torch.nn.Sequential(
+                torch.nn.Conv2d(3, 64, 3, stride=2, padding=1),
+                torch.nn.Conv2d(64, 128, 3, stride=2, padding=1),
+                torch.nn.Conv2d(128, 256, 3, stride=2, padding=1)
+            ).to(fastest_device)
+
+            for batch_test in [16, 32, 64]:
+                if progress.wasCanceled(): return
+
+                dummy_input = torch.randn(batch_test, 3, 640, 640, device=fastest_device)
+                _ = dummy_conv(dummy_input)
+
+                # If we survived without OOM, accept it
+                best_batch = batch_test
+
+                del dummy_input
+                if fastest_device == 'cuda:0': torch.cuda.empty_cache()
+
+        except RuntimeError: # OOM error
+            pass # fallback to last successful batch
+        except Exception:
+            pass # fallback
+
+        progress.setValue(len(devices_to_test) + 1)
+
+        # Apply results to UI
+        train_idx = self.combo_train.findData(fastest_device)
+        if train_idx != -1: self.combo_train.setCurrentIndex(train_idx)
+        infer_idx = self.combo_infer.findData(fastest_device)
+        if infer_idx != -1: self.combo_infer.setCurrentIndex(infer_idx)
+
+        self.spin_batch.setValue(best_batch)
+
+        # Format results string
+        res_str = "\n".join([f"{d.upper()}: {t:.3f} seconds" if t != float('inf') else f"{d.upper()}: FAILED" for d, t in results.items()])
+
+        QMessageBox.information(self, "Benchmark Complete",
+                                f"Live Benchmark Results:\n\n{res_str}\n\n"
+                                f"Fastest Device: {fastest_device.upper()}\n"
+                                f"Max Stable Batch Size: {best_batch}\n\n"
+                                f"Settings updated.")
 
     def save_settings(self):
         self.settings['train_device'] = self.combo_train.currentData()
