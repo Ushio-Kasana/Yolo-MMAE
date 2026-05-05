@@ -822,6 +822,7 @@ class MainWindow(QMainWindow):
         step = 0
         for i in range(self.current_frame_idx + 1, self.video_processor.total_frames):
             progress.setValue(step)
+            progress.setLabelText(f"Smart Tracking objects...\nChecked {step} frames. {total_steps - step} frames remaining.")
             QApplication.processEvents()
 
             if progress.wasCanceled():
