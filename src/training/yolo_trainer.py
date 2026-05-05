@@ -12,7 +12,7 @@ class YoloTrainer:
 
         self.models_path.mkdir(parents=True, exist_ok=True)
 
-    def train(self, epochs=10, imgsz=640, project_name="my_project", progress_callback=None, pretrained=True, device='cpu'):
+    def train(self, epochs=10, imgsz=640, project_name="my_project", progress_callback=None, pretrained=True, device='cpu', batch_size=16, workers=8):
         """
         Trains YOLOv8 model on the saved dataset.
         Returns the path to the best trained model weights.
@@ -38,6 +38,8 @@ class YoloTrainer:
             project=str(self.models_path.absolute()),
             name=f"{project_name}_model",
             device=device,
+            batch=batch_size,
+            workers=workers,
             exist_ok=True
         )
 

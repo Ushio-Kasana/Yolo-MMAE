@@ -194,17 +194,8 @@ class MainWindow(QMainWindow):
         self.cached_yolo_model = None
 
         # Load default hardware settings
-        import torch
-        best_device = 'cpu'
-        if torch.cuda.is_available():
-            best_device = 'cuda:0'
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            best_device = 'mps'
-
-        self.app_settings = {
-            'train_device': best_device,
-            'inference_device': best_device
-        }
+        from ui.settings import load_global_settings
+        self.app_settings = load_global_settings()
 
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, frame_dock)
 
@@ -992,7 +983,9 @@ class MainWindow(QMainWindow):
                 project_name=self.project_manager.get_project_name(),
                 progress_callback=update_progress,
                 pretrained=use_pretrained,
-                device=self.app_settings['train_device']
+                device=self.app_settings['train_device'],
+                batch_size=self.app_settings.get('batch_size', 16),
+                workers=self.app_settings.get('workers', 4)
             )
 
             # Invalidate cached model so next run uses freshly trained weights
