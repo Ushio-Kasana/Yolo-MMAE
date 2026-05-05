@@ -108,22 +108,33 @@ class ProjectManager:
                 return k
         return -1
 
-    def save_annotation(self, image_name: str, image_data, annotations: list):
+    def save_annotation(self, image_name: str, image_data, annotations: list, subfolder: str = None):
         """
         Saves image and its YOLO annotations.
         image_name: base name (e.g., 'frame_001.jpg')
         image_data: numpy array from OpenCV
         annotations: list of dicts {'class_id': int, 'x_center': float, 'y_center': float, 'width': float, 'height': float}
+        subfolder: optional string to isolate media sources (e.g., 'my_video_mp4')
         """
         import cv2
 
+        # Determine target directories
+        img_dir = self.train_images_path
+        lbl_dir = self.train_labels_path
+
+        if subfolder:
+            img_dir = img_dir / subfolder
+            lbl_dir = lbl_dir / subfolder
+            img_dir.mkdir(parents=True, exist_ok=True)
+            lbl_dir.mkdir(parents=True, exist_ok=True)
+
         # Save image (defaulting to train split for now)
-        img_file = self.train_images_path / image_name
+        img_file = img_dir / image_name
         cv2.imwrite(str(img_file), image_data)
 
         # Save label
         txt_name = image_name.rsplit('.', 1)[0] + '.txt'
-        label_file = self.train_labels_path / txt_name
+        label_file = lbl_dir / txt_name
 
         with open(label_file, 'w') as f:
             for ann in annotations:
@@ -134,7 +145,8 @@ class ProjectManager:
         if not self.train_labels_path.exists():
             return
 
-        for label_file in self.train_labels_path.glob("*.txt"):
+        # Recursive glob to handle subfolders
+        for label_file in self.train_labels_path.rglob("*.txt"):
             lines = []
             with open(label_file, 'r') as f:
                 lines = f.readlines()

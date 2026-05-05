@@ -252,6 +252,8 @@ class MainWindow(QMainWindow):
     def load_video(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open Video File", "", "Video Files (*.mp4 *.avi *.mkv *.mov *.wmv *.flv *.webm)")
         if path:
+            from pathlib import Path
+            self.current_media_name = Path(path).name.replace('.', '_')
             self.video_processor = VideoProcessor(path, self.cb_load_full.isChecked())
             self.slider.setMaximum(self.video_processor.total_frames - 1)
             self.current_frame_idx = 0
@@ -260,61 +262,81 @@ class MainWindow(QMainWindow):
 
     def restore_project_images(self):
         train_path = self.project_manager.train_images_path
-        if not train_path.exists() or not list(train_path.glob("*.jpg")):
+        if not train_path.exists():
             QMessageBox.information(self, "No Images", "No exported images found in the dataset to restore.")
             return
 
-        # Optional: Ask user to filter by category or restore all
-        cat_choices = ["All Categories"] + [f"{i}: {name}" for i, name in sorted(self.project_manager.categories.items())]
-        item, ok = QInputDialog.getItem(self, "Restore Project", "Select category to restore:", cat_choices, 0, False)
+        # Discover subfolders representing media sources
+        media_folders = [d.name for d in train_path.iterdir() if d.is_dir()]
+        if not media_folders:
+            # Fallback if no subfolders exist (legacy projects)
+            if list(train_path.glob("*.jpg")):
+                media_folders = ["(Root Directory)"]
+            else:
+                QMessageBox.information(self, "No Images", "No exported images found in the dataset to restore.")
+                return
+
+        # Ask user which media source to restore
+        media_choice, ok = QInputDialog.getItem(self, "Select Media Source", "Choose the media source to restore:", media_folders, 0, False)
         if not ok:
             return
 
-        target_class_id = -1
-        if item != "All Categories":
-            target_class_id = int(item.split(":")[0])
+        target_img_dir = train_path if media_choice == "(Root Directory)" else train_path / media_choice
+        target_lbl_dir = self.project_manager.train_labels_path if media_choice == "(Root Directory)" else self.project_manager.train_labels_path / media_choice
 
-        # Collect paths to load
-        from video.processor import ImageSequenceProcessor
+        # Ask overlay vs sequence
+        reply_mode = QMessageBox.question(self, 'Restoration Mode',
+                                     'Do you want to import these annotations back over the CURRENT loaded media? (Select Yes)\n\n'
+                                     'Select No to just load the saved image crops as a standalone sequence.',
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
 
-        valid_image_paths = []
-        labels_path = self.project_manager.train_labels_path
+        is_overlay = (reply_mode == QMessageBox.StandardButton.Yes)
 
-        for img_file in sorted(train_path.glob("*.jpg")):
-            label_file = labels_path / (img_file.stem + ".txt")
-            if not label_file.exists():
-                if target_class_id == -1:
-                    valid_image_paths.append(img_file)
-                continue
-
-            has_target = False
-            with open(label_file, 'r') as f:
-                for line in f:
-                    parts = line.strip().split()
-                    if parts:
-                        if target_class_id == -1 or int(parts[0]) == target_class_id:
-                            has_target = True
-                            break
-            if has_target:
-                valid_image_paths.append(img_file)
-
-        if not valid_image_paths:
-            QMessageBox.information(self, "No Matches", "No images found matching that category.")
+        if is_overlay and not self.video_processor:
+            QMessageBox.warning(self, "Error", "You must load a video/media file first before you can import annotations over it.")
             return
 
-        self.unload_media()
-        self.video_processor = ImageSequenceProcessor(valid_image_paths)
-        self.slider.setMaximum(self.video_processor.total_frames - 1)
+        valid_image_paths = sorted(target_img_dir.glob("*.jpg"))
+        if not valid_image_paths:
+            QMessageBox.information(self, "No Matches", "No images found in that source folder.")
+            return
+
+        if not is_overlay:
+            from video.processor import ImageSequenceProcessor
+            self.unload_media()
+            self.video_processor = ImageSequenceProcessor(valid_image_paths)
+            self.slider.setMaximum(self.video_processor.total_frames - 1)
+            self.current_media_name = media_choice if media_choice != "(Root Directory)" else None
 
         # Repopulate annotations by reading .txt files and un-normalizing
         for idx, img_path in enumerate(valid_image_paths):
-            label_file = labels_path / (img_path.stem + ".txt")
-            if label_file.exists():
-                img = cv2.imread(str(img_path))
-                if img is None: continue
-                img_h, img_w = img.shape[:2]
+            label_file = target_lbl_dir / (img_path.stem + ".txt")
 
-                self.annotations[idx] = []
+            # Determine the target frame index
+            if is_overlay:
+                try:
+                    # Extract frame number from 'frame_000142.jpg'
+                    target_idx = int(img_path.stem.split('_')[-1])
+                except ValueError:
+                    target_idx = idx
+            else:
+                target_idx = idx
+
+            if label_file.exists():
+                # We need image dimensions to un-normalize.
+                # If overlaying, getting the actual frame is best.
+                img_h, img_w = 640, 640 # safe fallback
+                if is_overlay:
+                    frame = self.video_processor.get_frame(target_idx)
+                    if frame is not None:
+                        img_h, img_w = frame.shape[:2]
+                else:
+                    import cv2
+                    img = cv2.imread(str(img_path))
+                    if img is not None:
+                        img_h, img_w = img.shape[:2]
+
+                self.annotations[target_idx] = []
                 with open(label_file, 'r') as f:
                     for line in f:
                         parts = line.strip().split()
@@ -322,13 +344,12 @@ class MainWindow(QMainWindow):
                             cls_id = int(parts[0])
                             x_c, y_c, nw, nh = map(float, parts[1:5])
 
-                            # un-normalize
                             w = nw * img_w
                             h = nh * img_h
                             x = (x_c * img_w) - (w / 2)
                             y = (y_c * img_h) - (h / 2)
 
-                            self.annotations[idx].append({
+                            self.annotations[target_idx].append({
                                 'box': (int(x), int(y), int(w), int(h)),
                                 'class_id': cls_id
                             })
@@ -542,7 +563,8 @@ class MainWindow(QMainWindow):
             })
 
         img_name = f"frame_{frame_idx:06d}.jpg"
-        self.project_manager.save_annotation(img_name, self.current_frame_data, yolo_anns)
+        subfolder = getattr(self, 'current_media_name', None)
+        self.project_manager.save_annotation(img_name, self.current_frame_data, yolo_anns, subfolder)
 
     def _prompt_auto_fix(self, box, class_id):
         if not self.video_processor or self.current_frame_idx >= self.video_processor.total_frames - 1:
