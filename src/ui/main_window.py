@@ -10,6 +10,7 @@ import cv2
 from PyQt6.QtWidgets import QApplication
 
 from ui.startup import StartupDialog
+from ui.settings import TORCH_AVAILABLE, TORCH_IMPORT_ERROR
 from ui.canvas import VideoCanvas
 from project.manager import ProjectManager
 from video.processor import VideoProcessor, ObjectTracker
@@ -24,6 +25,10 @@ class MainWindow(QMainWindow):
         self.video_processor = None
         self.tracker = ObjectTracker()
 
+        # Check PyTorch status on startup
+        if not TORCH_AVAILABLE:
+            QTimer.singleShot(500, self._show_torch_warning)
+
         self.current_frame_idx = 0
         self.current_frame_data = None
 
@@ -31,6 +36,13 @@ class MainWindow(QMainWindow):
         self.annotations = {}
 
         self.init_ui()
+
+    def _show_torch_warning(self):
+        QMessageBox.warning(self, "AI Features Disabled",
+                            f"Failed to load PyTorch machine learning libraries.\n\n"
+                            f"Error: {TORCH_IMPORT_ERROR}\n\n"
+                            f"If this is a 'Permission denied' error on macOS, please go to System Settings > Privacy & Security > Full Disk Access and grant permissions to your Terminal or IDE.\n\n"
+                            f"YOLO Training and 'Play with Model' features are temporarily disabled.")
 
     def init_ui(self):
         # Center Canvas

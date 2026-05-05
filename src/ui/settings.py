@@ -2,22 +2,31 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QComboBox, QGroupBox, QFormLayout,
                              QSpinBox)
 from PyQt6.QtCore import Qt
-import torch
 import json
 import os
 from pathlib import Path
 
 GLOBAL_CONFIG_PATH = Path.home() / ".yolo_annotator_config.json"
 
+# Try to import torch safely
+TORCH_AVAILABLE = False
+TORCH_IMPORT_ERROR = None
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except Exception as e:
+    TORCH_IMPORT_ERROR = str(e)
+
 def load_global_settings():
     import multiprocessing
     default_workers = max(1, multiprocessing.cpu_count() // 2)
 
     best_device = 'cpu'
-    if torch.cuda.is_available():
-        best_device = 'cuda:0'
-    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-        best_device = 'mps'
+    if TORCH_AVAILABLE:
+        if torch.cuda.is_available():
+            best_device = 'cuda:0'
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            best_device = 'mps'
 
     defaults = {
         'train_device': best_device,
@@ -67,6 +76,9 @@ class SettingsDialog(QDialog):
 
     def _discover_devices(self):
         devices = [('CPU', 'cpu')]
+
+        if not TORCH_AVAILABLE:
+            return devices
 
         # Check for CUDA (Nvidia GPU)
         if torch.cuda.is_available():
@@ -172,16 +184,17 @@ class SettingsDialog(QDialog):
         best_device = 'cpu'
         vram_gb = 0
 
-        if torch.cuda.is_available():
-            best_device = 'cuda:0'
-            try:
-                vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-            except:
-                vram_gb = 8
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            best_device = 'mps'
-            # MPS uses unified memory. Estimate based on total system RAM.
-            vram_gb = psutil.virtual_memory().total / (1024**3)
+        if TORCH_AVAILABLE:
+            if torch.cuda.is_available():
+                best_device = 'cuda:0'
+                try:
+                    vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                except:
+                    vram_gb = 8
+            elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                best_device = 'mps'
+                # MPS uses unified memory. Estimate based on total system RAM.
+                vram_gb = psutil.virtual_memory().total / (1024**3)
 
         # Determine Safe Batch Size based on VRAM/RAM
         if best_device == 'cpu':
@@ -217,8 +230,13 @@ class SettingsDialog(QDialog):
                                 f"Settings updated to safe maximums.")
 
     def run_live_benchmark(self):
-        import time
         from PyQt6.QtWidgets import QProgressDialog, QMessageBox, QApplication
+
+        if not TORCH_AVAILABLE:
+            QMessageBox.warning(self, "Benchmark Unavailable", f"Cannot run benchmark. PyTorch is unavailable:\n\n{TORCH_IMPORT_ERROR}")
+            return
+
+        import time
 
         devices_to_test = [d[1] for d in self.available_devices]
         if not devices_to_test:
