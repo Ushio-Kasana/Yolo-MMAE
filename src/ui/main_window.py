@@ -83,10 +83,15 @@ class MainWindow(QMainWindow):
         self.btn_save.setStyleSheet("background-color: darkgreen; color: white;")
         toolbar.addWidget(self.btn_save)
 
-        self.btn_train = QPushButton("Export YOLO Model")
+        self.btn_train = QPushButton("Train YOLO Model")
         self.btn_train.clicked.connect(self.train_model)
         self.btn_train.setStyleSheet("background-color: darkblue; color: white;")
         toolbar.addWidget(self.btn_train)
+
+        self.btn_convert = QPushButton("Convert Model")
+        self.btn_convert.clicked.connect(self.convert_model)
+        self.btn_convert.setStyleSheet("background-color: purple; color: white;")
+        toolbar.addWidget(self.btn_convert)
 
         # Draw Tools Toolbar
         draw_toolbar = QToolBar("Drawing Tools")
@@ -221,7 +226,7 @@ class MainWindow(QMainWindow):
             self.update_category_list()
 
     def load_video(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open Video File", "", "Video Files (*.mp4 *.avi *.mkv)")
+        path, _ = QFileDialog.getOpenFileName(self, "Open Video File", "", "Video Files (*.mp4 *.avi *.mkv *.mov *.wmv *.flv *.webm)")
         if path:
             self.video_processor = VideoProcessor(path, self.cb_load_full.isChecked())
             self.slider.setMaximum(self.video_processor.total_frames - 1)
@@ -673,6 +678,39 @@ class MainWindow(QMainWindow):
 
         progress.setValue(total_items)
         QMessageBox.information(self, "Done", "Project dataset saved successfully.")
+
+    def convert_model(self):
+        project_name = self.project_manager.get_project_name()
+        best_model_path = self.project_manager.models_path / f"{project_name}_model" / "weights" / "best.pt"
+
+        if not best_model_path.exists():
+            QMessageBox.warning(self, "No Model Found", "Please train the YOLO model first before converting it.")
+            return
+
+        formats = ["onnx", "tfjs", "tflite", "coreml", "openvino"]
+        item, ok = QInputDialog.getItem(self, "Convert Model", "Select Export Format:", formats, 0, False)
+
+        if ok and item:
+            progress = QProgressDialog(f"Converting model to {item}... (This may take several minutes)", "Cancel", 0, 0, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.show()
+            QApplication.processEvents()
+
+            try:
+                from ultralytics import YOLO
+                model = YOLO(str(best_model_path))
+
+                # YOLOv8 export can sometimes block, so process events before starting
+                QApplication.processEvents()
+
+                # Export the model
+                exported_path = model.export(format=item)
+
+                progress.close()
+                QMessageBox.information(self, "Done", f"Model successfully exported to:\n{exported_path}")
+            except Exception as e:
+                progress.close()
+                QMessageBox.critical(self, "Export Error", f"Failed to convert model:\n{str(e)}")
 
     def train_model(self):
         from training.yolo_trainer import YoloTrainer
