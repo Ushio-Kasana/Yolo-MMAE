@@ -78,7 +78,7 @@ class MainWindow(QMainWindow):
 
         self.btn_import_model = QPushButton("Import Model")
         self.btn_import_model.clicked.connect(self.import_external_model)
-        self.btn_import_model.setStyleSheet("color: blue;")
+        self.btn_import_model.setStyleSheet("background-color: #2196F3; color: white;")
         self.btn_import_model.setToolTip("Import a .pt model from another project to use with 'Play with Model'")
         toolbar.addWidget(self.btn_import_model)
 
