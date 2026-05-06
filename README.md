@@ -116,3 +116,4 @@ The following features are currently being worked on or need to be addressed in 
 * **Fix "Auto Scan (Motion)" Button:** After selecting the images to add to a model in most cases it wont acully add them into the project or dataset.
 * **Add Reminder/Warning to save:** Add a Warning/Reminder for users to save there current state and work instead of just closing.
 * **Fix Auto Scaling button:** Currently dosent work at all.
+* **New Implimentation of Load full video:** currently ticking Load full video uses heaps of ram so add a new option that loads around 120 by default but will promt the user for the amount of frames of the video tehy would like to laod at a time to reduce load times and RAM usage for slower machines with less memory.
