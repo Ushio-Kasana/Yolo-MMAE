@@ -113,3 +113,6 @@ The following features are currently being worked on or need to be addressed in 
 * **Cross-Platform Compatibility:** Fully test and guarantee support for Windows and Linux environments.
 * **Light Mode vs Dark Mode Support:** Fix Python ui and some of the visual elements for Light Mode users. Currently, when using Light Mode, the white outlines on the Review Group menu blend into the background, making it difficult to see boxes and selected objects.
 * **Add support to allow existing models:** add implementation to allow already existing models to be further trained and expanded on.
+* **Fix "Auto Scan (Motion)" Button:** After selecting the images to add to a model in most cases it wont acully add them into the project or dataset.
+* **Add Reminder/Warning to save:** Add a Warning/Reminder for users to save there current state and work instead of just closing.
+* **Fix Auto Scaling button:** Currently dosent work at all.
