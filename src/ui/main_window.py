@@ -366,30 +366,69 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No Categories", "No categories selected for restoration.")
             return
 
-        if not is_overlay:
-            from video.processor import ImageSequenceProcessor
-            self.unload_media()
-            self.video_processor = ImageSequenceProcessor(valid_image_paths)
-            self.slider.setMaximum(self.video_processor.total_frames - 1)
-            self.current_media_name = media_choice if media_choice != "(Root Directory)" else None
-
         # Repopulate annotations by reading .txt files and un-normalizing
+
+        # Track valid indices so we can filter non-overlay frames
+        filtered_image_paths = []
+
+        # First pass to parse labels and decide if the frame actually contains our targets
+        frames_to_keep = set()
+
         for idx, img_path in enumerate(valid_image_paths):
             label_file = target_lbl_dir / (img_path.stem + ".txt")
 
             # Determine the target frame index
             if is_overlay:
                 try:
-                    # Extract frame number from 'frame_000142.jpg'
                     target_idx = int(img_path.stem.split('_')[-1])
                 except ValueError:
                     target_idx = idx
             else:
                 target_idx = idx
 
+            has_matching_class = False
             if label_file.exists():
-                # We need image dimensions to un-normalize.
-                # If overlaying, getting the actual frame is best.
+                with open(label_file, 'r') as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if len(parts) >= 5:
+                            cls_id = int(parts[0])
+                            if cls_id in selected_cat_ids:
+                                has_matching_class = True
+                                break
+
+            # If we're overlaying, we want to load annotations onto exactly those frames regardless.
+            # But if we're loading a standalone sequence, we ONLY want to keep frames that have the requested categories!
+            if is_overlay or has_matching_class:
+                filtered_image_paths.append(img_path)
+                frames_to_keep.add(target_idx)
+
+        if not is_overlay:
+            # Need to re-init processor with ONLY the filtered frames so timeline reflects only them
+            if not filtered_image_paths:
+                QMessageBox.information(self, "No Matches", "No images found containing the selected categories.")
+                self.unload_media()
+                return
+            from video.processor import ImageSequenceProcessor
+            self.video_processor.release()
+            self.video_processor = ImageSequenceProcessor(filtered_image_paths)
+            self.slider.setMaximum(self.video_processor.total_frames - 1)
+            # When standalone, the sequence is packed down to contiguous indices 0 to N
+            frames_to_keep = set(range(len(filtered_image_paths)))
+
+        for loop_idx, img_path in enumerate(filtered_image_paths):
+            label_file = target_lbl_dir / (img_path.stem + ".txt")
+
+            # Determine the target frame index
+            if is_overlay:
+                try:
+                    target_idx = int(img_path.stem.split('_')[-1])
+                except ValueError:
+                    target_idx = loop_idx
+            else:
+                target_idx = loop_idx
+
+            if label_file.exists():
                 img_h, img_w = 640, 640 # safe fallback
                 if is_overlay:
                     frame = self.video_processor.get_frame(target_idx)
@@ -426,6 +465,10 @@ class MainWindow(QMainWindow):
                                 'class_id': cls_id
                             })
 
+        if is_overlay:
+            QMessageBox.information(self, "Success", "Annotations successfully overlaid onto the current media.")
+        else:
+            QMessageBox.information(self, "Success", f"Image sequence loaded with {len(filtered_image_paths)} matching frames.")
         self.show_frame()
 
     def unload_media(self):
