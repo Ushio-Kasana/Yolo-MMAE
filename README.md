@@ -1,4 +1,5 @@
 # YOLO Video Annotator & Auto-Tracker
+*Multi-Media Annotation Engine*
 
 A powerful, hardware-accelerated desktop application built with Python, PyQt6, and OpenCV designed to streamline the creation of YOLO object detection datasets. Instead of manually annotating thousands of frames by hand, this tool leverages OpenCV tracking, motion detection, and Live YOLO Inference to automate the labeling process.
 
