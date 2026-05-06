@@ -410,7 +410,8 @@ class MainWindow(QMainWindow):
                 self.unload_media()
                 return
             from video.processor import ImageSequenceProcessor
-            self.video_processor.release()
+            if self.video_processor:
+                self.video_processor.release()
             self.video_processor = ImageSequenceProcessor(filtered_image_paths)
             self.slider.setMaximum(self.video_processor.total_frames - 1)
             # When standalone, the sequence is packed down to contiguous indices 0 to N
