@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+src/.DS_Store
+.DS_Store
+yolov8n.pt
+.vscode/settings.json
