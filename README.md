@@ -22,7 +22,7 @@ A powerful, hardware-accelerated desktop application built with Python, PyQt6, a
 ## 🛠 Installation
 
 ### macOS Automated Installation
-For macOS users, we provide automated setup and startup scripts to simplify the installation process. The repository also includes a pre-made `venv` folder for optional isolated environments.
+For macOS users, we provide automated setup and startup scripts to simplify the installation process. The `Macos-Setup-Venv.sh` script creates a new `venv` folder in the current folder for a optional isolated environments.
 
 **Option 1: Using Virtual Environment (Recommended)**
 ```bash
@@ -44,7 +44,7 @@ bash Macos-Start-Systemwide.sh
 
 *Note for macOS users:* If you receive a `PermissionError` on startup regarding PyTorch, ensure your Terminal or IDE has "Full Disk Access" enabled in System Settings > Privacy & Security.
 
-### Manual Installation / Windows & Linux
+### Manual Installation / Windows / MacOS & Linux
 If you are on Windows, Linux, or prefer to install manually, follow these steps:
 
 **Prerequisites:**
@@ -53,14 +53,13 @@ If you are on Windows, Linux, or prefer to install manually, follow these steps:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/yolo-video-annotator.git
-cd yolo-video-annotator
+git clone https://github.com/Ushio-Kasana/Yolo-MMAE.git
+cd Yolo-MMAE
 
 # Install requirements
-pip install PyQt6 opencv-python numpy pyyaml ultralytics psutil
+pip install -r src/requirements.txt
 
 # Run the application
-export PYTHONPATH=$PYTHONPATH:$(pwd)/src
 python src/main.py
 ```
 
@@ -106,3 +105,4 @@ The following features are currently being worked on or need to be addressed in 
 * **Auto-Benchmarking:** Fix the auto benchmarking utility to work correctly and yield more reliable heuristics across varied hardware.
 * **Cross-Platform Compatibility:** Fully test and guarantee support for Windows and Linux environments.
 * **Light Mode vs Dark Mode Support:** Fix Python ui and some of the visual elements for Light Mode users. Currently, when using Light Mode, the white outlines on the Review Group menu blend into the background, making it difficult to see boxes and selected objects.
+* **Add support to allow existing models:** add implementation to allow already existing models to be further trained and expanded on.
