@@ -5,7 +5,7 @@ if command -v python3.10 &>/dev/null; then
 else
      if command -v brew &>/dev/null; then
         echo "✅ Homebrew is installed"
-        read -p "Python 3.10 is not installed woukd you like to install it via Brew? (y/n)" pythoninstall
+        read -p "Python 3.10 is not installed woukd you like to install it via Brew? (y/n): " pythoninstall
         if [[ "$pythoninstall" == "y" || "$pythoninstall" == "Y" ]]; then
             if brew install python@3.10; then
                 echo "python3.10 has been installed via Brew"
@@ -29,14 +29,14 @@ else
             exit 1
         fi
     else
-        read -p "Brew is not installed would you like me to install Brew (y/n)" brewinstall
-        if [[ "$reply" == "y" || "$reply" == "Y" ]]; then
+        read -p "Brew is not installed would you like me to install Brew (y/n): " brewinstall
+        if [[ "$brewinstall" == "y" || "$brewinstall" == "Y" ]]; then
             echo "Installing Homebrew now"
             /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
             eval "$(/opt/homebrew/bin/brew shellenv)"
             if command -v brew &>/dev/null; then
                 echo "✅ Homebrew is now installed"
-                read -p "Python 3.10 is not installed woukd you like to install it via Brew? (y/n)" pythoninstall
+                read -p "Python 3.10 is not installed woukd you like to install it via Brew? (y/n): " pythoninstall
                 if [[ "$pythoninstall" == "y" || "$pythoninstall" == "Y" ]]; then
                     if brew install python@3.10; then
                         echo "python3.10 has been installed via Brew"
@@ -70,6 +70,7 @@ else
     fi
 fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+python3.10 -m venv venv
 source "$SCRIPT_DIR/venv/bin/activate"
 cd src
 pip install -r requirements.txt
