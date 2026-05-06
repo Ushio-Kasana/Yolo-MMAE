@@ -21,9 +21,35 @@ A powerful, hardware-accelerated desktop application built with Python, PyQt6, a
 
 ## 🛠 Installation
 
-### Prerequisites
+### macOS Automated Installation
+For macOS users, we provide automated setup and startup scripts to simplify the installation process. The repository also includes a pre-made `venv` folder for optional isolated environments.
+
+**Option 1: Using Virtual Environment (Recommended)**
+```bash
+# Run the setup script to configure python and dependencies
+bash Macos-Setup-Venv.sh
+
+# Run the application
+bash Macos-Start-Venv.sh
+```
+
+**Option 2: System-wide Installation**
+```bash
+# Run the setup script to configure python and dependencies system-wide
+bash Macos-Setup-systemwide.sh
+
+# Run the application
+bash Macos-Start-Systemwide.sh
+```
+
+*Note for macOS users:* If you receive a `PermissionError` on startup regarding PyTorch, ensure your Terminal or IDE has "Full Disk Access" enabled in System Settings > Privacy & Security.
+
+### Manual Installation / Windows & Linux
+If you are on Windows, Linux, or prefer to install manually, follow these steps:
+
+**Prerequisites:**
 * Python 3.10 or higher
-* [PyTorch](https://pytorch.org/get-started/locally/) installed for your specific hardware (CUDA for Nvidia, MPS for Apple Silicon).
+* [PyTorch](https://pytorch.org/get-started/locally/) installed for your specific hardware (CUDA for Nvidia).
 
 ```bash
 # Clone the repository
@@ -37,8 +63,6 @@ pip install PyQt6 opencv-python numpy pyyaml ultralytics psutil
 export PYTHONPATH=$PYTHONPATH:$(pwd)/src
 python src/main.py
 ```
-
-*Note for macOS users:* If you receive a `PermissionError` on startup regarding PyTorch, ensure your Terminal or IDE has "Full Disk Access" enabled in System Settings > Privacy & Security.
 
 ## 📖 Usage Guide
 

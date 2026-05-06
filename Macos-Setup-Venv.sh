@@ -30,7 +30,7 @@ else
         fi
     else
         read -p "Brew is not installed would you like me to install Brew (y/n)" brewinstall
-        if [[ "$reply" == "y" || "$reply" == "Y" ]]; then
+        if [[ "$brewinstall" == "y" || "$brewinstall" == "Y" ]]; then
             echo "Installing Homebrew now"
             /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
             eval "$(/opt/homebrew/bin/brew shellenv)"
