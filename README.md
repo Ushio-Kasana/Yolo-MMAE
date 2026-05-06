@@ -98,6 +98,12 @@ Click the **⚙ Settings** button in the top right. Click **Run Live Benchmark**
 
 ---
 
+## 📝 License
+
+This project is licensed under the **GNU General Public License v3.0 (GPLv3)** - see the [LICENSE](LICENSE) file for details.
+
+This means you are free to use, modify, and distribute this software, provided that any derivative works are also open-source and licensed under the exact same GPLv3 license. You must also include the original copyright notice and attribute the original author (Ushio-kasana) in any copies or substantial uses of the work.
+
 ## 🗺️ Known Issues & Roadmap
 
 The following features are currently being worked on or need to be addressed in future releases:
