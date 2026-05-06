@@ -528,9 +528,22 @@ class MainWindow(QMainWindow):
                         x1, y1, x2, y2 = box.xyxy[0].tolist()
                         w = x2 - x1
                         h = y2 - y1
-                        cls_id = int(box.cls[0].item())
 
-                        self.pending_suggestions.append({'box': (int(x1), int(y1), int(w), int(h)), 'class_id': cls_id})
+                        # Try to map the detected class to an existing category
+                        detected_cls_idx = int(box.cls[0].item())
+                        detected_name = self.cached_yolo_model.names.get(detected_cls_idx, "")
+
+                        mapped_cls_id = -1
+                        for cat_id, cat_name in self.project_manager.categories.items():
+                            if cat_name.lower() == detected_name.lower():
+                                mapped_cls_id = cat_id
+                                break
+
+                        # If no mapped class, fallback to the currently selected class, or default 0
+                        if mapped_cls_id == -1:
+                            mapped_cls_id = self.get_selected_class_id()
+
+                        self.pending_suggestions.append({'box': (int(x1), int(y1), int(w), int(h)), 'class_id': mapped_cls_id})
                 return
             else:
                 self._toggle_playback()
@@ -1118,6 +1131,18 @@ class MainWindow(QMainWindow):
         try:
             shutil.copy2(path, dest_path)
             self.cached_yolo_model = None # Invalidate cache so new model loads
+
+            # Ask if they want to import a labels config file
+            reply = QMessageBox.question(self, 'Import Labels',
+                                         'Do you have a labels JSON config file to import with this model?\n\nIf not, playing with this model will assign detections to your currently selected category.',
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+            if reply == QMessageBox.StandardButton.Yes:
+                label_path, _ = QFileDialog.getOpenFileName(self, "Import Labels File", "", "JSON Files (*.json)")
+                if label_path:
+                    dest_label_path = self.project_manager.models_path / f"{project_name}_model" / "weights" / "labels.json"
+                    shutil.copy2(label_path, dest_label_path)
+
             QMessageBox.information(self, "Success", "Model imported successfully. You can now use 'Play with Model'.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to import model: {e}")

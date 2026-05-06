@@ -92,7 +92,7 @@ class VideoProcessor:
             return frame if ret else None
 
     def release(self):
-        if not self.load_full and self.cap:
+        if self.load_mode != 'full' and self.cap:
             self.cap.release()
 
     def detect_motion(self, frame):
