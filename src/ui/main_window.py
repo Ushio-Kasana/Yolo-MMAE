@@ -18,8 +18,8 @@ import sys
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QToolBar,
                              QDockWidget, QListWidget, QInputDialog, QMessageBox,
-                             QCheckBox, QSlider, QDialog, QButtonGroup, QRadioButton,
-                             QProgressDialog)
+                             QSlider, QProgressDialog, QCheckBox, QDialog, QScrollArea,
+                             QButtonGroup, QRadioButton)
 from PyQt6.QtCore import Qt, QTimer
 import cv2
 from PyQt6.QtWidgets import QApplication
