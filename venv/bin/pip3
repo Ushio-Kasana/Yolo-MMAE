@@ -1,6 +1,4 @@
-#!/bin/sh
-'''exec' "/Volumes/My Shared Files/Home/Documents/Coding/Yolo-MMAE/venv/bin/python3.10" "$0" "$@"
-' '''
+#!/Users/ushiokasana/Documents/Coding/Yolo-MMAE/venv/bin/python3.10
 import sys
 from pip._internal.cli.main import main
 if __name__ == '__main__':
