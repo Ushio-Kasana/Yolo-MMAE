@@ -18,7 +18,7 @@ A powerful, hardware-accelerated desktop application built with Python, PyQt6, a
 ## 💻 Compatible Systems
 * Tested on Mac OS Tahoe 26.4
 * Windows not tested
-* Linux not tested
+* Tested on Ubuntu 24.04.4 LTS X86_64.
 
 ## 🛠 Installation
 
