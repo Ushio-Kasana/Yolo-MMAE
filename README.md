@@ -22,8 +22,8 @@ A powerful, hardware-accelerated desktop application built with Python, PyQt6, a
 
 ## 🛠 Installation
 
-### macOS Automated Installation
-For macOS users, we provide automated setup and startup scripts to simplify the installation process. The `Macos-Setup-Venv.sh` script creates a new `venv` folder in the current folder for a optional isolated environments.
+### macOS Automated Installation (Linux Users May Also Follow These Steps)
+For macOS/Linux users, we provide automated setup and startup scripts to simplify the installation process. The `Macos-Setup-Venv.sh` script creates a new `venv` folder in the current folder for a optional isolated environments.
 
 **Option 1: Using Virtual Environment (Recommended)**
 ```bash
