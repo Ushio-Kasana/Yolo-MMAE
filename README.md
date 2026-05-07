@@ -18,12 +18,12 @@ A powerful, hardware-accelerated desktop application built with Python, PyQt6, a
 ## 💻 Compatible Systems
 * Tested on Mac OS Tahoe 26.4
 * Windows not tested
-* Linux not tested
+* Tested on Ubuntu 24.04.4 LTS X86_64.
 
 ## 🛠 Installation
 
-### macOS Automated Installation
-For macOS users, we provide automated setup and startup scripts to simplify the installation process. The `Macos-Setup-Venv.sh` script creates a new `venv` folder in the current folder for a optional isolated environments.
+### macOS Automated Installation (Linux Users May Also Follow These Steps)
+For macOS/Linux users, we provide automated setup and startup scripts to simplify the installation process. The `Macos-Setup-Venv.sh` script creates a new `venv` folder in the current folder for a optional isolated environments.
 
 **Option 1: Using Virtual Environment (Recommended)**
 ```bash
@@ -107,13 +107,11 @@ This means you are free to use, modify, and distribute this software, provided t
 ## 🗺️ Known Issues & Roadmap
 
 The following features are currently being worked on or need to be addressed in future releases:
-* **Restoring images from a specific category:** Currently, restoration loads all categories. Future updates will allow precise filtering.
 * **UI Performance:** Fix some spikes in menus and application freezing or stuttering during heavy OpenCV or PyTorch background tasks.
 * **Auto-Benchmarking:** Fix the auto benchmarking utility to work correctly and yield more reliable heuristics across varied hardware.
 * **Cross-Platform Compatibility:** Fully test and guarantee support for Windows and Linux environments.
-* **Light Mode vs Dark Mode Support:** Fix Python ui and some of the visual elements for Light Mode users. Currently, when using Light Mode, the white outlines on the Review Group menu blend into the background, making it difficult to see boxes and selected objects.
 * **Add support to allow existing models:** add implementation to allow already existing models to be further trained and expanded on.
 * **Fix "Auto Scan (Motion)" Button:** After selecting the images to add to a model in most cases it wont acully add them into the project or dataset.
-* **Add Reminder/Warning to save:** Add a Warning/Reminder for users to save there current state and work instead of just closing.
 * **Fix Auto Scaling button:** Currently dosent work at all.
-* **New Implimentation of Load full video:** currently ticking Load full video uses heaps of ram so add a new option that loads around 120 by default but will promt the user for the amount of frames of the video tehy would like to laod at a time to reduce load times and RAM usage for slower machines with less memory.
+* **Adjust Auto Track (Proagate)** currently using this feature makes the script look in everyframe for the object from its existing location, upcoming fix will use the dataset to analyse each frame and to ignore frames that dont include the object.
+* **keeping images in dataset** Even when boxes where deleted or undone from drawings or automatied actions the images would still remain in traing data and dataset but not appear when restoreing images in software, also need to fix the implimentation of restoring images to show unknown or untilted labels.

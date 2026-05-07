@@ -18,8 +18,8 @@ import sys
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QToolBar,
                              QDockWidget, QListWidget, QInputDialog, QMessageBox,
-                             QCheckBox, QSlider, QDialog, QButtonGroup, QRadioButton,
-                             QProgressDialog)
+                             QSlider, QProgressDialog, QCheckBox, QDialog, QScrollArea,
+                             QButtonGroup, QRadioButton)
 from PyQt6.QtCore import Qt, QTimer
 import cv2
 from PyQt6.QtWidgets import QApplication
@@ -76,6 +76,12 @@ class MainWindow(QMainWindow):
         self.btn_load_video.clicked.connect(self.load_video)
         toolbar.addWidget(self.btn_load_video)
 
+        self.btn_import_model = QPushButton("Import Model")
+        self.btn_import_model.clicked.connect(self.import_external_model)
+        self.btn_import_model.setStyleSheet("background-color: #2196F3; color: white;")
+        self.btn_import_model.setToolTip("Import a .pt model from another project to use with 'Play with Model'")
+        toolbar.addWidget(self.btn_import_model)
+
         self.btn_restore = QPushButton("Restore Images")
         self.btn_restore.clicked.connect(self.restore_project_images)
         self.btn_restore.setStyleSheet("background-color: darkorange; color: white;")
@@ -88,6 +94,14 @@ class MainWindow(QMainWindow):
 
         self.cb_load_full = QCheckBox("Load Full Video")
         toolbar.addWidget(self.cb_load_full)
+
+        self.cb_load_buffered = QCheckBox("Load Buffered")
+        self.cb_load_buffered.setChecked(True) # default
+        toolbar.addWidget(self.cb_load_buffered)
+
+        # Make them mutually exclusive
+        self.cb_load_full.toggled.connect(lambda checked: self.cb_load_buffered.setChecked(False) if checked else None)
+        self.cb_load_buffered.toggled.connect(lambda checked: self.cb_load_full.setChecked(False) if checked else None)
 
         self.cb_suggestions = QCheckBox("Show Tracking Suggestions")
         self.cb_suggestions.setChecked(True)
@@ -281,7 +295,22 @@ class MainWindow(QMainWindow):
         if path:
             from pathlib import Path
             self.current_media_name = Path(path).name.replace('.', '_')
-            self.video_processor = VideoProcessor(path, self.cb_load_full.isChecked())
+            if self.cb_load_full.isChecked():
+                load_mode = 'full'
+            elif self.cb_load_buffered.isChecked():
+                load_mode = 'buffered'
+            else:
+                load_mode = 'ondemand'
+
+            buffer_size = 120
+            if load_mode == 'buffered':
+                val, ok = QInputDialog.getInt(self, "Buffer Size", "Frames to load at a time:", 120, 10, 1000)
+                if ok:
+                    buffer_size = val
+                else:
+                    return # user cancelled
+
+            self.video_processor = VideoProcessor(path, load_mode, buffer_size)
             self.slider.setMaximum(self.video_processor.total_frames - 1)
             self.current_frame_idx = 0
             self.annotations = {} # Clear annotations for new media
@@ -328,30 +357,79 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No Matches", "No images found in that source folder.")
             return
 
-        if not is_overlay:
-            from video.processor import ImageSequenceProcessor
-            self.unload_media()
-            self.video_processor = ImageSequenceProcessor(valid_image_paths)
-            self.slider.setMaximum(self.video_processor.total_frames - 1)
-            self.current_media_name = media_choice if media_choice != "(Root Directory)" else None
+        # Ask user which categories to restore
+        dialog = CategorySelectorDialog(self.project_manager.categories, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected_cat_ids = dialog.get_selected_ids()
+        if not selected_cat_ids:
+            QMessageBox.information(self, "No Categories", "No categories selected for restoration.")
+            return
 
         # Repopulate annotations by reading .txt files and un-normalizing
+
+        # Track valid indices so we can filter non-overlay frames
+        filtered_image_paths = []
+
+        # First pass to parse labels and decide if the frame actually contains our targets
+        frames_to_keep = set()
+
         for idx, img_path in enumerate(valid_image_paths):
             label_file = target_lbl_dir / (img_path.stem + ".txt")
 
             # Determine the target frame index
             if is_overlay:
                 try:
-                    # Extract frame number from 'frame_000142.jpg'
                     target_idx = int(img_path.stem.split('_')[-1])
                 except ValueError:
                     target_idx = idx
             else:
                 target_idx = idx
 
+            has_matching_class = False
             if label_file.exists():
-                # We need image dimensions to un-normalize.
-                # If overlaying, getting the actual frame is best.
+                with open(label_file, 'r') as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if len(parts) >= 5:
+                            cls_id = int(parts[0])
+                            if cls_id in selected_cat_ids:
+                                has_matching_class = True
+                                break
+
+            # If we're overlaying, we want to load annotations onto exactly those frames regardless.
+            # But if we're loading a standalone sequence, we ONLY want to keep frames that have the requested categories!
+            if is_overlay or has_matching_class:
+                filtered_image_paths.append(img_path)
+                frames_to_keep.add(target_idx)
+
+        if not is_overlay:
+            # Need to re-init processor with ONLY the filtered frames so timeline reflects only them
+            if not filtered_image_paths:
+                QMessageBox.information(self, "No Matches", "No images found containing the selected categories.")
+                self.unload_media()
+                return
+            from video.processor import ImageSequenceProcessor
+            if self.video_processor:
+                self.video_processor.release()
+            self.video_processor = ImageSequenceProcessor(filtered_image_paths)
+            self.slider.setMaximum(self.video_processor.total_frames - 1)
+            # When standalone, the sequence is packed down to contiguous indices 0 to N
+            frames_to_keep = set(range(len(filtered_image_paths)))
+
+        for loop_idx, img_path in enumerate(filtered_image_paths):
+            label_file = target_lbl_dir / (img_path.stem + ".txt")
+
+            # Determine the target frame index
+            if is_overlay:
+                try:
+                    target_idx = int(img_path.stem.split('_')[-1])
+                except ValueError:
+                    target_idx = loop_idx
+            else:
+                target_idx = loop_idx
+
+            if label_file.exists():
                 img_h, img_w = 640, 640 # safe fallback
                 if is_overlay:
                     frame = self.video_processor.get_frame(target_idx)
@@ -363,12 +441,19 @@ class MainWindow(QMainWindow):
                     if img is not None:
                         img_h, img_w = img.shape[:2]
 
-                self.annotations[target_idx] = []
+                if target_idx not in self.annotations:
+                    self.annotations[target_idx] = []
+
                 with open(label_file, 'r') as f:
                     for line in f:
                         parts = line.strip().split()
                         if len(parts) >= 5:
                             cls_id = int(parts[0])
+
+                            # Only restore selected categories
+                            if cls_id not in selected_cat_ids:
+                                continue
+
                             x_c, y_c, nw, nh = map(float, parts[1:5])
 
                             w = nw * img_w
@@ -381,9 +466,22 @@ class MainWindow(QMainWindow):
                                 'class_id': cls_id
                             })
 
+        if is_overlay:
+            QMessageBox.information(self, "Success", "Annotations successfully overlaid onto the current media.")
+        else:
+            QMessageBox.information(self, "Success", f"Image sequence loaded with {len(filtered_image_paths)} matching frames.")
         self.show_frame()
 
     def unload_media(self):
+        if self.annotations and len(self.annotations) > 0:
+            reply = QMessageBox.question(self, 'Unsaved Changes',
+                                         'You have annotations in memory that may not be exported to the dataset yet.\n\nDo you want to export your dataset before unloading media?',
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel)
+            if reply == QMessageBox.StandardButton.Yes:
+                self.export_dataset()
+            elif reply == QMessageBox.StandardButton.Cancel:
+                return
+
         if self.video_processor:
             self.video_processor.release()
             self.video_processor = None
@@ -474,9 +572,22 @@ class MainWindow(QMainWindow):
                         x1, y1, x2, y2 = box.xyxy[0].tolist()
                         w = x2 - x1
                         h = y2 - y1
-                        cls_id = int(box.cls[0].item())
 
-                        self.pending_suggestions.append({'box': (int(x1), int(y1), int(w), int(h)), 'class_id': cls_id})
+                        # Try to map the detected class to an existing category
+                        detected_cls_idx = int(box.cls[0].item())
+                        detected_name = self.cached_yolo_model.names.get(detected_cls_idx, "")
+
+                        mapped_cls_id = -1
+                        for cat_id, cat_name in self.project_manager.categories.items():
+                            if cat_name.lower() == detected_name.lower():
+                                mapped_cls_id = cat_id
+                                break
+
+                        # If no mapped class, fallback to the currently selected class, or default 0
+                        if mapped_cls_id == -1:
+                            mapped_cls_id = self.get_selected_class_id()
+
+                        self.pending_suggestions.append({'box': (int(x1), int(y1), int(w), int(h)), 'class_id': mapped_cls_id})
                 return
             else:
                 self._toggle_playback()
@@ -509,6 +620,22 @@ class MainWindow(QMainWindow):
         if self.video_processor and self.current_frame_idx > 0:
             self.current_frame_idx -= 1
             self.show_frame()
+    def closeEvent(self, event):
+        if self.annotations and len(self.annotations) > 0:
+            reply = QMessageBox.question(self, 'Unsaved Changes',
+                                         'You have annotations in memory that may not be exported to the dataset yet.\n\nDo you want to export your dataset before closing?',
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel)
+
+            if reply == QMessageBox.StandardButton.Yes:
+                self.export_dataset()
+                event.accept()
+            elif reply == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+            else:
+                event.accept()
+        else:
+            event.accept()
+
 
     def toggle_play(self):
         if not self.video_processor: return
@@ -764,9 +891,46 @@ class MainWindow(QMainWindow):
 
             boxes = self.video_processor.detect_motion(frame)
             if boxes:
+                # Try to load model to classify the motion if available
+                model_to_use = None
+                project_name = self.project_manager.get_project_name()
+                best_model_path = self.project_manager.models_path / f"{project_name}_model" / "weights" / "best.pt"
+
+                if best_model_path.exists():
+                    if self.cached_yolo_model is None:
+                        from ultralytics import YOLO
+                        self.cached_yolo_model = YOLO(str(best_model_path))
+                        if hasattr(self, 'app_settings') and 'inference_device' in self.app_settings:
+                            self.cached_yolo_model.to(self.app_settings['inference_device'])
+                    model_to_use = self.cached_yolo_model
+
                 temp_anns[i] = []
                 for b in boxes:
-                    temp_anns[i].append({'box': b, 'class_id': -1}) # -1 for unassigned
+                    class_id_to_assign = -1 # default to unknown
+
+                    if model_to_use is not None:
+                        # Extract the crop of the motion
+                        x, y, w, h = b
+                        # Ensure bounds
+                        x = max(0, x)
+                        y = max(0, y)
+                        crop = frame[y:y+h, x:x+w]
+                        if crop.size > 0:
+                            # Run inference just on the crop
+                            results = model_to_use(crop, verbose=False)
+                            for r in results:
+                                if len(r.boxes) > 0:
+                                    # Pick the highest confidence detection
+                                    best_box = r.boxes[0]
+                                    predicted_label = model_to_use.names[int(best_box.cls[0])]
+
+                                    # Try to map string label back to project categories
+                                    for cat_id, cat_name in self.project_manager.categories.items():
+                                        if cat_name.lower() == predicted_label.lower():
+                                            class_id_to_assign = cat_id
+                                            break
+
+                    temp_anns[i].append({'box': b, 'class_id': class_id_to_assign})
 
         progress.setValue(self.video_processor.total_frames)
 
@@ -994,6 +1158,40 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 progress.close()
                 QMessageBox.critical(self, "Export Error", f"Failed to convert model:\n{str(e)}")
+    def import_external_model(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Import External Model", "", "PyTorch Models (*.pt)")
+        if not path:
+            return
+
+        import shutil
+        from pathlib import Path
+
+        project_name = self.project_manager.get_project_name()
+        weights_dir = self.project_manager.models_path / f"{project_name}_model" / "weights"
+        weights_dir.mkdir(parents=True, exist_ok=True)
+
+        dest_path = weights_dir / "best.pt"
+
+        try:
+            shutil.copy2(path, dest_path)
+            self.cached_yolo_model = None # Invalidate cache so new model loads
+
+            # Ask if they want to import a labels config file
+            reply = QMessageBox.question(self, 'Import Labels',
+                                         'Do you have a labels JSON config file to import with this model?\n\nIf not, playing with this model will assign detections to your currently selected category.',
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+            if reply == QMessageBox.StandardButton.Yes:
+                label_path, _ = QFileDialog.getOpenFileName(self, "Import Labels File", "", "JSON Files (*.json)")
+                if label_path:
+                    dest_label_path = self.project_manager.models_path / f"{project_name}_model" / "weights" / "labels.json"
+                    shutil.copy2(label_path, dest_label_path)
+
+            QMessageBox.information(self, "Success", "Model imported successfully. You can now use 'Play with Model'.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to import model: {e}")
+
+
 
     def train_model(self):
         from training.yolo_trainer import YoloTrainer
@@ -1011,10 +1209,16 @@ class MainWindow(QMainWindow):
         trainer = YoloTrainer(self.project_manager.project_path)
 
         reply_pretrained = QMessageBox.question(self, 'Training Base',
-                                     'Do you want to use a pre-trained base model? (Recommended for speed and accuracy).\n\nSelect "No" to train completely from scratch.',
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                                     'Do you want to use a pre-trained base model? (Recommended for speed and accuracy).\n\nSelect "No" to train completely from scratch.\nSelect "Cancel" to pick a specific .pt file to resume training from.',
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel)
 
-        use_pretrained = (reply_pretrained == QMessageBox.StandardButton.Yes)
+        if reply_pretrained == QMessageBox.StandardButton.Cancel:
+            path, _ = QFileDialog.getOpenFileName(self, "Select Model to Resume Training", "", "PyTorch Models (*.pt)")
+            if not path:
+                return # User cancelled file selection
+            use_pretrained = path
+        else:
+            use_pretrained = (reply_pretrained == QMessageBox.StandardButton.Yes)
 
         epochs = QInputDialog.getInt(self, "Training Settings", "Number of Epochs to train:", value=10, min=1, max=1000)
         if not epochs[1]:
@@ -1045,3 +1249,51 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Done", f"Training complete! Model saved to:\n{best_model}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Training failed:\n{str(e)}")
+
+class CategorySelectorDialog(QDialog):
+    def __init__(self, categories, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Categories to Restore")
+        self.layout = QVBoxLayout()
+        self.setLayout(self.layout)
+
+        self.layout.addWidget(QLabel("Select which categories you want to restore:"))
+
+        self.checkboxes = {}
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout()
+        scroll_widget.setLayout(scroll_layout)
+
+        # Add "All" option
+        self.cb_all = QCheckBox("Select All")
+        self.cb_all.setChecked(True)
+        self.cb_all.stateChanged.connect(self.toggle_all)
+        scroll_layout.addWidget(self.cb_all)
+
+        for cat_id, cat_name in categories.items():
+            cb = QCheckBox(f"{cat_name} (ID: {cat_id})")
+            cb.setChecked(True)
+            self.checkboxes[cat_id] = cb
+            scroll_layout.addWidget(cb)
+
+        scroll.setWidget(scroll_widget)
+        self.layout.addWidget(scroll)
+
+        btn_layout = QHBoxLayout()
+        btn_ok = QPushButton("OK")
+        btn_ok.clicked.connect(self.accept)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(btn_ok)
+        btn_layout.addWidget(btn_cancel)
+        self.layout.addLayout(btn_layout)
+
+    def toggle_all(self, state):
+        is_checked = (state == Qt.CheckState.Checked.value)
+        for cb in self.checkboxes.values():
+            cb.setChecked(is_checked)
+
+    def get_selected_ids(self):
+        return [cat_id for cat_id, cb in self.checkboxes.items() if cb.isChecked()]
