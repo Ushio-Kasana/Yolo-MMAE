@@ -26,6 +26,8 @@ else
         read -p "Would you rather install Python 3.10 through apt (y) or use Brew (n)? (y/n): " apt_choice
         if [[ "$apt_choice" == "y" || "$apt_choice" == "Y" ]]; then
             echo "Installing Python 3.10 via apt..."
+            sudo apt update && sudo apt install -y software-properties-common
+            sudo add-apt-repository -y ppa:deadsnakes/ppa
             sudo apt update && sudo apt install -y python3.10 python3.10-venv python3-pip
             if ! command -v python3.10 &>/dev/null; then
                  echo "Failed to install Python 3.10 via apt. Exiting."
