@@ -228,16 +228,20 @@ class MainWindow(QMainWindow):
         # Playback row
         play_layout = QHBoxLayout()
         self.btn_play = QPushButton("▶ Play")
+        self.btn_play.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_play.clicked.connect(self.toggle_play)
 
         self.btn_play_model = QPushButton("▶ Play with Model")
         self.btn_play_model.setStyleSheet("background-color: darkblue; color: white;")
+        self.btn_play_model.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_play_model.clicked.connect(self.toggle_play_model)
 
         self.cb_auto_confirm = QCheckBox("Auto-Confirm Suggestions during Play")
+        self.cb_auto_confirm.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self.btn_confirm_sug = QPushButton("Confirm Suggestions (Enter)")
         self.btn_confirm_sug.setStyleSheet("background-color: darkcyan; color: white;")
+        self.btn_confirm_sug.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_confirm_sug.clicked.connect(self.confirm_suggestions)
         self.btn_confirm_sug.hide()
 
@@ -250,11 +254,13 @@ class MainWindow(QMainWindow):
         # Scrubber row
         scrub_layout = QHBoxLayout()
         self.btn_prev = QPushButton("<<")
+        self.btn_prev.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_prev.clicked.connect(self.prev_frame)
 
         self.lbl_frame = QLabel("Frame: 0 / 0")
 
         self.btn_next = QPushButton(">>")
+        self.btn_next.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_next.clicked.connect(self.next_frame)
 
         self.slider = QSlider(Qt.Orientation.Horizontal)
@@ -855,6 +861,10 @@ class MainWindow(QMainWindow):
             self.undo_last_box()
         elif event.key() == Qt.Key.Key_Enter or event.key() == Qt.Key.Key_Return:
             self.confirm_suggestions()
+        elif event.key() == Qt.Key.Key_Left:
+            self.prev_frame()
+        elif event.key() == Qt.Key.Key_Right:
+            self.next_frame()
         super().keyPressEvent(event)
 
     def change_box_category(self):
