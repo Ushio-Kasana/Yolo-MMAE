@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QDockWidget, QListWidget, QInputDialog, QMessageBox,
                              QSlider, QProgressDialog, QCheckBox, QDialog, QScrollArea,
                              QButtonGroup, QRadioButton)
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 import cv2
 from PyQt6.QtWidgets import QApplication
 
@@ -29,6 +29,50 @@ from ui.settings import TORCH_AVAILABLE, TORCH_IMPORT_ERROR
 from ui.canvas import VideoCanvas
 from project.manager import ProjectManager
 from video.processor import VideoProcessor, ObjectTracker
+
+class TrainingThread(QThread):
+    progress_updated = pyqtSignal(int)
+    training_finished = pyqtSignal(str)
+    training_failed = pyqtSignal(str)
+
+    def __init__(self, trainer, epochs, project_name, pretrained, device, batch_size, workers):
+        super().__init__()
+        self.trainer = trainer
+        self.epochs = epochs
+        self.project_name = project_name
+        self.pretrained = pretrained
+        self.device = device
+        self.batch_size = batch_size
+        self.workers = workers
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
+
+    def run(self):
+        try:
+            def update_progress(current_epoch, total_epochs):
+                self.progress_updated.emit(current_epoch)
+                if self._is_cancelled:
+                    return False
+                return True
+
+            best_model = self.trainer.train(
+                epochs=self.epochs,
+                project_name=self.project_name,
+                progress_callback=update_progress,
+                pretrained=self.pretrained,
+                device=self.device,
+                batch_size=self.batch_size,
+                workers=self.workers
+            )
+
+            if self._is_cancelled:
+                self.training_finished.emit("CANCELLED")
+            else:
+                self.training_finished.emit(best_model)
+        except Exception as e:
+            self.training_failed.emit(str(e))
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -1224,37 +1268,41 @@ class MainWindow(QMainWindow):
         if not epochs[1]:
             return
 
-        try:
-            progress = QProgressDialog("Training YOLO Model...", "Cancel", 0, epochs[0], self)
-            progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self.training_progress = QProgressDialog("Training YOLO Model...", "Cancel", 0, epochs[0], self)
+        self.training_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self.training_progress.setValue(0)
 
-            def update_progress(current_epoch, total_epochs):
-                progress.setValue(current_epoch)
-                QApplication.processEvents()
-                if progress.wasCanceled():
-                    return False
-                return True
+        self.training_thread = TrainingThread(
+            trainer=trainer,
+            epochs=epochs[0],
+            project_name=self.project_manager.get_project_name(),
+            pretrained=use_pretrained,
+            device=self.app_settings['train_device'],
+            batch_size=self.app_settings.get('batch_size', 16),
+            workers=self.app_settings.get('workers', 4)
+        )
 
-            best_model = trainer.train(
-                epochs=epochs[0],
-                project_name=self.project_manager.get_project_name(),
-                progress_callback=update_progress,
-                pretrained=use_pretrained,
-                device=self.app_settings['train_device'],
-                batch_size=self.app_settings.get('batch_size', 16),
-                workers=self.app_settings.get('workers', 4)
-            )
+        self.training_progress.canceled.connect(self.training_thread.cancel)
 
-            # Invalidate cached model so next run uses freshly trained weights
+        def on_progress_updated(epoch):
+            self.training_progress.setValue(epoch)
+
+        def on_training_finished(best_model):
             self.cached_yolo_model = None
-
-            if progress.wasCanceled():
+            if best_model == "CANCELLED":
                 QMessageBox.information(self, "Cancelled", "Training was cancelled.")
             else:
-                progress.setValue(epochs[0])
+                self.training_progress.setValue(epochs[0])
                 QMessageBox.information(self, "Done", f"Training complete! Model saved to:\n{best_model}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Training failed:\n{str(e)}")
+
+        def on_training_failed(error_msg):
+            QMessageBox.critical(self, "Error", f"Training failed:\n{error_msg}")
+
+        self.training_thread.progress_updated.connect(on_progress_updated)
+        self.training_thread.training_finished.connect(on_training_finished)
+        self.training_thread.training_failed.connect(on_training_failed)
+
+        self.training_thread.start()
 
 class CategorySelectorDialog(QDialog):
     def __init__(self, categories, parent=None):
