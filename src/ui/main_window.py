@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QDockWidget, QListWidget, QInputDialog, QMessageBox,
                              QSlider, QProgressDialog, QCheckBox, QDialog, QScrollArea,
                              QButtonGroup, QRadioButton)
+from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 import cv2
 from PyQt6.QtWidgets import QApplication
@@ -95,6 +96,7 @@ class MainWindow(QMainWindow):
         self.annotations = {}
 
         self.init_ui()
+        self.init_shortcuts()
 
     def _show_torch_warning(self):
         QMessageBox.warning(self, "AI Features Disabled",
@@ -102,6 +104,27 @@ class MainWindow(QMainWindow):
                             f"Error: {TORCH_IMPORT_ERROR}\n\n"
                             f"If this is a 'Permission denied' error on macOS, please go to System Settings > Privacy & Security > Full Disk Access and grant permissions to your Terminal or IDE.\n\n"
                             f"YOLO Training and 'Play with Model' features are temporarily disabled.")
+
+    def init_shortcuts(self):
+        shortcut_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
+        shortcut_undo.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        shortcut_undo.activated.connect(self.undo_last_box)
+
+        shortcut_confirm = QShortcut(QKeySequence(Qt.Key.Key_Enter), self)
+        shortcut_confirm.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        shortcut_confirm.activated.connect(self.confirm_suggestions)
+
+        shortcut_confirm_ret = QShortcut(QKeySequence(Qt.Key.Key_Return), self)
+        shortcut_confirm_ret.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        shortcut_confirm_ret.activated.connect(self.confirm_suggestions)
+
+        shortcut_left = QShortcut(QKeySequence(Qt.Key.Key_Left), self)
+        shortcut_left.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        shortcut_left.activated.connect(self.prev_frame)
+
+        shortcut_right = QShortcut(QKeySequence(Qt.Key.Key_Right), self)
+        shortcut_right.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        shortcut_right.activated.connect(self.next_frame)
 
     def init_ui(self):
         # Center Canvas
@@ -857,14 +880,7 @@ class MainWindow(QMainWindow):
             self.show_frame()
 
     def keyPressEvent(self, event):
-        if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Z:
-            self.undo_last_box()
-        elif event.key() == Qt.Key.Key_Enter or event.key() == Qt.Key.Key_Return:
-            self.confirm_suggestions()
-        elif event.key() == Qt.Key.Key_Left:
-            self.prev_frame()
-        elif event.key() == Qt.Key.Key_Right:
-            self.next_frame()
+        # Hotkeys moved to global QShortcuts in init_shortcuts()
         super().keyPressEvent(event)
 
     def change_box_category(self):
