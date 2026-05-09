@@ -1231,6 +1231,9 @@ class MainWindow(QMainWindow):
             def update_progress(current_epoch, total_epochs):
                 progress.setValue(current_epoch)
                 QApplication.processEvents()
+                if progress.wasCanceled():
+                    return False
+                return True
 
             best_model = trainer.train(
                 epochs=epochs[0],
@@ -1245,8 +1248,11 @@ class MainWindow(QMainWindow):
             # Invalidate cached model so next run uses freshly trained weights
             self.cached_yolo_model = None
 
-            progress.setValue(epochs[0])
-            QMessageBox.information(self, "Done", f"Training complete! Model saved to:\n{best_model}")
+            if progress.wasCanceled():
+                QMessageBox.information(self, "Cancelled", "Training was cancelled.")
+            else:
+                progress.setValue(epochs[0])
+                QMessageBox.information(self, "Done", f"Training complete! Model saved to:\n{best_model}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Training failed:\n{str(e)}")
 

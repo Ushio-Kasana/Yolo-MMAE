@@ -47,7 +47,9 @@ class YoloTrainer:
         # Inject custom callback if provided
         if progress_callback:
             def on_fit_epoch_end(trainer):
-                progress_callback(trainer.epoch, trainer.epochs)
+                should_continue = progress_callback(trainer.epoch, trainer.epochs)
+                if should_continue is False:
+                    trainer.stop = True
             model.add_callback("on_fit_epoch_end", on_fit_epoch_end)
 
         # Train

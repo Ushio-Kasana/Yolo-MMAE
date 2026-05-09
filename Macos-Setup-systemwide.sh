@@ -14,6 +14,39 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+OS_NAME="$(uname -s)"
+
+if [ "$OS_NAME" = "Linux" ]; then
+    if ! command -v brew &>/dev/null; then
+        echo "❌ Homebrew is not installed."
+        read -p "Brew is not installed. Would you rather install Python 3.10 through apt (y) or install Brew (n)? (y/n): " apt_choice
+        if [[ "$apt_choice" == "y" || "$apt_choice" == "Y" ]]; then
+            echo "Installing Python 3.10 via apt..."
+            sudo apt update && sudo apt install -y python3.10 python3.10-venv python3-pip
+
+            cd src
+            if python3.10 -m pip install -r requirements.txt; then
+                echo "Python Requirements Installed"
+                exit 0
+            else
+                read -p "Failed to install Requirements, would you like to try again? (y/n): " reply2
+                if [[ "$reply2" == "y" || "$reply2" == "Y" ]]; then
+                    echo "Trying again"
+                    if python3.10 -m pip install -r requirements.txt; then
+                        echo "Python Requirements Installed"
+                        exit 0
+                    else
+                        echo "Failed to install Requirements"
+                        exit 1
+                    fi
+                fi
+                exit 1
+            fi
+        fi
+    fi
+fi
+
 #Check if Brew is installed
 echo "Checking if homebrew is currently installed"
 if command -v brew &>/dev/null; then
@@ -56,7 +89,17 @@ else
     if [[ "$reply" == "y" || "$reply" == "Y" ]]; then
         echo "Installing Homebrew now"
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        eval "$(/opt/homebrew/bin/brew shellenv)"
+
+        if [ "$OS_NAME" = "Linux" ]; then
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+        else
+            if [ -x "/opt/homebrew/bin/brew" ]; then
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+            elif [ -x "/usr/local/bin/brew" ]; then
+                eval "$(/usr/local/bin/brew shellenv)"
+            fi
+        fi
+
         if command -v brew &>/dev/null; then
             echo "✅ Homebrew is now installed"
             echo "Trying to install python3.10 via Brew"
