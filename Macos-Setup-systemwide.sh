@@ -17,6 +17,8 @@
 
 OS_NAME="$(uname -s)"
 
+FORCE_BREW_INSTALL="n"
+
 if [ "$OS_NAME" = "Linux" ]; then
     if ! command -v brew &>/dev/null; then
         echo "❌ Homebrew is not installed."
@@ -33,14 +35,14 @@ if [ "$OS_NAME" = "Linux" ]; then
             fi
 
             cd src
-            if python3.10 -m pip install -r requirements.txt; then
+            if python3.10 -m pip install -r requirements.txt --break-system-packages; then
                 echo "Python Requirements Installed"
                 exit 0
             else
                 read -p "Failed to install Requirements, would you like to try again? (y/n): " reply2
                 if [[ "$reply2" == "y" || "$reply2" == "Y" ]]; then
                     echo "Trying again"
-                    if python3.10 -m pip install -r requirements.txt; then
+                    if python3.10 -m pip install -r requirements.txt --break-system-packages; then
                         echo "Python Requirements Installed"
                         exit 0
                     else
@@ -50,6 +52,8 @@ if [ "$OS_NAME" = "Linux" ]; then
                 fi
                 exit 1
             fi
+        else
+            FORCE_BREW_INSTALL="y"
         fi
     fi
 fi
@@ -92,13 +96,18 @@ if command -v brew &>/dev/null; then
     fi
 else
     echo "❌ Homebrew is not installed."
-    read -p "Would you like to install it now? (y/n): " reply
+    if [[ "$FORCE_BREW_INSTALL" == "y" || "$FORCE_BREW_INSTALL" == "Y" ]]; then
+        reply="y"
+    else
+        read -p "Would you like to install it now? (y/n): " reply
+    fi
     if [[ "$reply" == "y" || "$reply" == "Y" ]]; then
         echo "Installing Homebrew now"
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
         if [ "$OS_NAME" = "Linux" ]; then
-            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+            echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"' >> "$HOME/.bashrc"
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
         else
             if [ -x "/opt/homebrew/bin/brew" ]; then
                 eval "$(/opt/homebrew/bin/brew shellenv)"

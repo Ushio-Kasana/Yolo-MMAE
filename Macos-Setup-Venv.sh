@@ -17,6 +17,8 @@
 
 OS_NAME="$(uname -s)"
 
+FORCE_BREW_INSTALL="n"
+
 #check if python is installed
 if command -v python3.10 &>/dev/null; then
     echo "Python 3.10 is installed"
@@ -33,6 +35,8 @@ else
                  echo "Failed to install Python 3.10 via apt. Exiting."
                  exit 1
             fi
+        else
+            FORCE_BREW_INSTALL="y"
         fi
     fi
 
@@ -64,13 +68,18 @@ else
                 exit 1
             fi
         else
-            read -p "Brew is not installed would you like me to install Brew (y/n): " brewinstall
+            if [[ "$FORCE_BREW_INSTALL" == "y" || "$FORCE_BREW_INSTALL" == "Y" ]]; then
+                brewinstall="y"
+            else
+                read -p "Brew is not installed would you like me to install Brew (y/n): " brewinstall
+            fi
             if [[ "$brewinstall" == "y" || "$brewinstall" == "Y" ]]; then
                 echo "Installing Homebrew now"
                 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
                 if [ "$OS_NAME" = "Linux" ]; then
-                    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+                    echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"' >> "$HOME/.bashrc"
+                    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
                 else
                     if [ -x "/opt/homebrew/bin/brew" ]; then
                         eval "$(/opt/homebrew/bin/brew shellenv)"
