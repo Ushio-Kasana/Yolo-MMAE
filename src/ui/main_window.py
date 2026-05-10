@@ -20,7 +20,8 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QDockWidget, QListWidget, QInputDialog, QMessageBox,
                              QSlider, QProgressDialog, QCheckBox, QDialog, QScrollArea,
                              QButtonGroup, QRadioButton)
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QShortcut, QKeySequence
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 import cv2
 from PyQt6.QtWidgets import QApplication
 
@@ -29,6 +30,50 @@ from ui.settings import TORCH_AVAILABLE, TORCH_IMPORT_ERROR
 from ui.canvas import VideoCanvas
 from project.manager import ProjectManager
 from video.processor import VideoProcessor, ObjectTracker
+
+class TrainingThread(QThread):
+    progress_updated = pyqtSignal(int)
+    training_finished = pyqtSignal(str)
+    training_failed = pyqtSignal(str)
+
+    def __init__(self, trainer, epochs, project_name, pretrained, device, batch_size, workers):
+        super().__init__()
+        self.trainer = trainer
+        self.epochs = epochs
+        self.project_name = project_name
+        self.pretrained = pretrained
+        self.device = device
+        self.batch_size = batch_size
+        self.workers = workers
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
+
+    def run(self):
+        try:
+            def update_progress(current_epoch, total_epochs):
+                self.progress_updated.emit(current_epoch)
+                if self._is_cancelled:
+                    return False
+                return True
+
+            best_model = self.trainer.train(
+                epochs=self.epochs,
+                project_name=self.project_name,
+                progress_callback=update_progress,
+                pretrained=self.pretrained,
+                device=self.device,
+                batch_size=self.batch_size,
+                workers=self.workers
+            )
+
+            if self._is_cancelled:
+                self.training_finished.emit("CANCELLED")
+            else:
+                self.training_finished.emit(best_model)
+        except Exception as e:
+            self.training_failed.emit(str(e))
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -51,6 +96,7 @@ class MainWindow(QMainWindow):
         self.annotations = {}
 
         self.init_ui()
+        self.init_shortcuts()
 
     def _show_torch_warning(self):
         QMessageBox.warning(self, "AI Features Disabled",
@@ -58,6 +104,27 @@ class MainWindow(QMainWindow):
                             f"Error: {TORCH_IMPORT_ERROR}\n\n"
                             f"If this is a 'Permission denied' error on macOS, please go to System Settings > Privacy & Security > Full Disk Access and grant permissions to your Terminal or IDE.\n\n"
                             f"YOLO Training and 'Play with Model' features are temporarily disabled.")
+
+    def init_shortcuts(self):
+        shortcut_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
+        shortcut_undo.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        shortcut_undo.activated.connect(self.undo_last_box)
+
+        shortcut_confirm = QShortcut(QKeySequence(Qt.Key.Key_Enter), self)
+        shortcut_confirm.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        shortcut_confirm.activated.connect(self.confirm_suggestions)
+
+        shortcut_confirm_ret = QShortcut(QKeySequence(Qt.Key.Key_Return), self)
+        shortcut_confirm_ret.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        shortcut_confirm_ret.activated.connect(self.confirm_suggestions)
+
+        shortcut_left = QShortcut(QKeySequence(Qt.Key.Key_Left), self)
+        shortcut_left.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        shortcut_left.activated.connect(self.prev_frame)
+
+        shortcut_right = QShortcut(QKeySequence(Qt.Key.Key_Right), self)
+        shortcut_right.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        shortcut_right.activated.connect(self.next_frame)
 
     def init_ui(self):
         # Center Canvas
@@ -184,16 +251,20 @@ class MainWindow(QMainWindow):
         # Playback row
         play_layout = QHBoxLayout()
         self.btn_play = QPushButton("▶ Play")
+        self.btn_play.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_play.clicked.connect(self.toggle_play)
 
         self.btn_play_model = QPushButton("▶ Play with Model")
         self.btn_play_model.setStyleSheet("background-color: darkblue; color: white;")
+        self.btn_play_model.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_play_model.clicked.connect(self.toggle_play_model)
 
         self.cb_auto_confirm = QCheckBox("Auto-Confirm Suggestions during Play")
+        self.cb_auto_confirm.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self.btn_confirm_sug = QPushButton("Confirm Suggestions (Enter)")
         self.btn_confirm_sug.setStyleSheet("background-color: darkcyan; color: white;")
+        self.btn_confirm_sug.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_confirm_sug.clicked.connect(self.confirm_suggestions)
         self.btn_confirm_sug.hide()
 
@@ -206,11 +277,13 @@ class MainWindow(QMainWindow):
         # Scrubber row
         scrub_layout = QHBoxLayout()
         self.btn_prev = QPushButton("<<")
+        self.btn_prev.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_prev.clicked.connect(self.prev_frame)
 
         self.lbl_frame = QLabel("Frame: 0 / 0")
 
         self.btn_next = QPushButton(">>")
+        self.btn_next.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_next.clicked.connect(self.next_frame)
 
         self.slider = QSlider(Qt.Orientation.Horizontal)
@@ -807,10 +880,7 @@ class MainWindow(QMainWindow):
             self.show_frame()
 
     def keyPressEvent(self, event):
-        if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Z:
-            self.undo_last_box()
-        elif event.key() == Qt.Key.Key_Enter or event.key() == Qt.Key.Key_Return:
-            self.confirm_suggestions()
+        # Hotkeys moved to global QShortcuts in init_shortcuts()
         super().keyPressEvent(event)
 
     def change_box_category(self):
@@ -1224,31 +1294,41 @@ class MainWindow(QMainWindow):
         if not epochs[1]:
             return
 
-        try:
-            progress = QProgressDialog("Training YOLO Model...", "Cancel", 0, epochs[0], self)
-            progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self.training_progress = QProgressDialog("Training YOLO Model...", "Cancel", 0, epochs[0], self)
+        self.training_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self.training_progress.setValue(0)
 
-            def update_progress(current_epoch, total_epochs):
-                progress.setValue(current_epoch)
-                QApplication.processEvents()
+        self.training_thread = TrainingThread(
+            trainer=trainer,
+            epochs=epochs[0],
+            project_name=self.project_manager.get_project_name(),
+            pretrained=use_pretrained,
+            device=self.app_settings['train_device'],
+            batch_size=self.app_settings.get('batch_size', 16),
+            workers=self.app_settings.get('workers', 4)
+        )
 
-            best_model = trainer.train(
-                epochs=epochs[0],
-                project_name=self.project_manager.get_project_name(),
-                progress_callback=update_progress,
-                pretrained=use_pretrained,
-                device=self.app_settings['train_device'],
-                batch_size=self.app_settings.get('batch_size', 16),
-                workers=self.app_settings.get('workers', 4)
-            )
+        self.training_progress.canceled.connect(self.training_thread.cancel)
 
-            # Invalidate cached model so next run uses freshly trained weights
+        def on_progress_updated(epoch):
+            self.training_progress.setValue(epoch)
+
+        def on_training_finished(best_model):
             self.cached_yolo_model = None
+            if best_model == "CANCELLED":
+                QMessageBox.information(self, "Cancelled", "Training was cancelled.")
+            else:
+                self.training_progress.setValue(epochs[0])
+                QMessageBox.information(self, "Done", f"Training complete! Model saved to:\n{best_model}")
 
-            progress.setValue(epochs[0])
-            QMessageBox.information(self, "Done", f"Training complete! Model saved to:\n{best_model}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Training failed:\n{str(e)}")
+        def on_training_failed(error_msg):
+            QMessageBox.critical(self, "Error", f"Training failed:\n{error_msg}")
+
+        self.training_thread.progress_updated.connect(on_progress_updated)
+        self.training_thread.training_finished.connect(on_training_finished)
+        self.training_thread.training_failed.connect(on_training_failed)
+
+        self.training_thread.start()
 
 class CategorySelectorDialog(QDialog):
     def __init__(self, categories, parent=None):
